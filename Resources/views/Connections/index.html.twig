@@ -1,0 +1,92 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+{% block mauticContent %}multimailconnections{% endblock %}
+{% block headerTitle %}Multi Mail · Conexões de e-mail{% endblock %}
+{% block content %}
+<div class="pa-md" id="mail-connections">
+    {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+    {% if saved %}<div class="alert alert-success" role="status">Configuração salva.</div>{% endif %}
+    <p class="text-muted">Cadastre contas SMTP e APIs e escolha a conexão de reserva de cada uma. O cadastro não altera os envios atuais do Mautic.</p>
+    {% if editing %}
+    <div class="alert alert-info"><div style="min-width:0;overflow-wrap:anywhere">
+        <strong>Usar esta conexão no envio do Mautic</strong>
+        <p>Em Configurações → Configurações de e-mail, use o esquema <code style="white-space:normal;overflow-wrap:anywhere">multimail</code> e o servidor <code style="white-space:normal;overflow-wrap:anywhere">{{ editing.id }}</code>. Deixe porta, usuário e senha vazios; o plugin utiliza as credenciais salvas e o fallback desta conexão.</p>
+        <p>Transporte: <code style="white-space:normal;overflow-wrap:anywhere">multimail://{{ editing.id }}</code>. O remetente e o conteúdo continuam definidos pelo Mautic; use um endereço autorizado no provedor principal e nas reservas.</p>
+    </div></div>
+    {% endif %}
+    <div class="panel panel-default">
+        <div class="panel-heading"><div class="panel-title">Suas conexões <span class="label label-default">{{ data.connections|length }}</span></div></div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead><tr><th>Conexão</th><th>Provedor</th><th>Remetente</th><th>Fallback</th><th>Credenciais</th><th><span class="sr-only">Ações</span></th></tr></thead>
+                <tbody>
+                {% for connection in data.connections %}
+                    <tr>
+                        <td><strong>{{ connection.name }}</strong></td>
+                        <td>{{ providers[connection.provider].label }}</td>
+                        <td>{{ connection.from_email }}{% if connection.reply_to %}<br><small class="text-muted">Respostas: {{ connection.reply_to }}</small>{% endif %}</td>
+                        <td>{% if connection.chain %}{% for step in connection.chain %}{{ step.name }}{% if not loop.last %} → {% endif %}{% endfor %}{% else %}<span class="text-muted">Sem fallback</span>{% endif %}</td>
+                        <td><i class="ri-lock-line" aria-hidden="true"></i> Salvas</td>
+                        <td><a class="btn btn-default btn-sm" href="{{ path('mautic_multimail_connections', {edit: connection.id}) }}">Editar<span class="sr-only"> {{ connection.name }}</span></a></td>
+                    </tr>
+                {% else %}<tr><td colspan="6" class="text-muted pa-md">Adicione sua primeira conexão abaixo.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="panel panel-default">
+        <div class="panel-heading"><div class="panel-title">{{ editing ? 'Editar conexão' : 'Nova conexão' }}</div></div>
+        <div class="panel-body">
+            <form method="post" action="{{ path('mautic_multimail_connections', editing ? {edit: editing.id} : {}) }}" autocomplete="off" id="mail-connection-form">
+                <input type="hidden" name="_token" value="{{ csrf_token('multimail_connections') }}">
+                <input type="hidden" name="revision" value="{{ data.revision }}">
+                <input type="hidden" name="id" value="{{ editing.id|default('') }}">
+                <input type="hidden" name="action" value="save">
+                <div class="row">
+                    <div class="col-md-6 form-group"><label for="mail-name">Nome da conexão</label><input class="form-control" id="mail-name" name="name" maxlength="100" value="{{ editing.name|default('') }}" placeholder="Ex.: Resend principal" required></div>
+                    <div class="col-md-6 form-group"><label for="mail-provider">Provedor</label>
+                        {% if editing %}<input type="hidden" name="provider" value="{{ provider }}"><input id="mail-provider" class="form-control" value="{{ providers[provider].label }}" readonly>
+                        {% else %}<select class="form-control" name="provider" id="mail-provider">{% for key, item in providers %}<option value="{{ key }}" {{ key == provider ? 'selected' : '' }}>{{ item.label }}</option>{% endfor %}</select>{% endif %}
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group"><label for="mail-from-name">Nome do remetente</label><input class="form-control" id="mail-from-name" name="from_name" maxlength="150" value="{{ editing.from_name|default('Macro Markets') }}" required></div>
+                    <div class="col-md-6 form-group"><label for="mail-from-email">E-mail do remetente</label><input type="email" class="form-control" id="mail-from-email" name="from_email" maxlength="254" value="{{ editing.from_email|default('') }}" placeholder="support@seu-dominio.com" required></div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group"><label for="mail-reply">Responder para <small class="text-muted">opcional</small></label><input type="email" class="form-control" id="mail-reply" name="reply_to" maxlength="254" value="{{ editing.reply_to|default('') }}"></div>
+                    <div class="col-md-6 form-group"><label for="mail-fallback">Conexão de fallback</label><select class="form-control" id="mail-fallback" name="fallback"><option value="">Sem fallback</option>{% for connection in data.connections %}{% if not editing or connection.id != editing.id %}<option value="{{ connection.id }}" {{ editing and connection.id == editing.fallback ? 'selected' : '' }}>{{ connection.name }} · {{ providers[connection.provider].label }}</option>{% endif %}{% endfor %}</select><p class="help-block">A cadeia de reservas aparece na lista. Não é permitido voltar a uma conexão já presente na cadeia.</p></div>
+                </div>
+                {% for key, item in providers %}
+                <fieldset data-mail-provider="{{ key }}" {{ key != provider ? 'hidden' : '' }}>
+                    <legend class="h5">{{ item.label }} · dados de acesso</legend>
+                    <div class="row">
+                    {% for field in item.settings %}
+                        {% set labels = {host: 'Servidor SMTP', port: 'Porta', encryption: 'Criptografia', username: 'Usuário SMTP', domain: 'Domínio de envio', region: 'Região'} %}
+                        {% set value = editing and key == provider ? editing.settings[field]|default('') : '' %}
+                        <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label>
+                        {% if field == 'encryption' %}<select class="form-control" name="settings[{{ field }}]" id="mail-{{ key }}-{{ field }}" {{ key != provider ? 'disabled' : '' }}><option value="tls" {{ value == 'tls' ? 'selected' : '' }}>STARTTLS · 587 ou 2525</option><option value="ssl" {{ value == 'ssl' ? 'selected' : '' }}>SSL/TLS · 465</option></select>
+                        {% elseif field == 'region' and key == 'mailgun' %}<select class="form-control" name="settings[region]" id="mail-mailgun-region" {{ key != provider ? 'disabled' : '' }}><option value="us" {{ value == 'us' ? 'selected' : '' }}>Estados Unidos</option><option value="eu" {{ value == 'eu' ? 'selected' : '' }}>Europa</option></select>
+                        {% else %}<input class="form-control" name="settings[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="{{ value ?: (field == 'port' ? '587' : '') }}" placeholder="{{ field == 'region' and key == 'ses' ? 'sa-east-1' : '' }}" maxlength="253" required {{ key != provider ? 'disabled' : '' }}>{% endif %}
+                        </div>
+                    {% endfor %}
+                    {% for field in item.secrets %}
+                        {% set labels = {password: 'Senha SMTP', api_key: 'Chave da API', access_key: 'AWS Access Key ID', secret_key: 'AWS Secret Access Key'} %}
+                        <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label><input type="password" class="form-control" name="secrets[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="" maxlength="4096" autocomplete="new-password" placeholder="{{ editing ? 'Salva · deixe vazio para manter' : 'Informe a credencial' }}" {{ not editing ? 'required' : '' }} {{ key != provider ? 'disabled' : '' }}></div>
+                    {% endfor %}
+                    </div>
+                </fieldset>
+                {% endfor %}
+                <p class="help-block"><i class="ri-lock-line" aria-hidden="true"></i> Senhas e chaves ficam privadas no servidor e não são exibidas. Você controla a troca e a revogação; não há prazo automático.</p>
+                <div class="mt-md"><button class="btn btn-primary" type="submit">Salvar conexão</button> <a class="btn btn-default" href="{{ path('mautic_multimail_connections') }}">{{ editing ? 'Cancelar / nova conexão' : 'Limpar' }}</a></div>
+            </form>
+            {% if editing %}
+            <form method="post" action="{{ path('mautic_multimail_connections', {edit: editing.id}) }}" class="mt-md" data-mail-remove>
+                <input type="hidden" name="_token" value="{{ csrf_token('multimail_connections') }}"><input type="hidden" name="revision" value="{{ data.revision }}"><input type="hidden" name="id" value="{{ editing.id }}"><input type="hidden" name="action" value="remove">
+                <button type="submit" class="btn btn-danger btn-sm">Remover conexão</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=2', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
+{% endblock %}

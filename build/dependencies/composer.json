@@ -1,0 +1,23 @@
+{
+  "name": "raphaelcangucu/multimail-bundled-transports",
+  "require": {
+    "php": ">=8.2",
+    "symfony/mailer": "^7.4",
+    "symfony/http-client": "^7.4",
+    "symfony/amazon-mailer": "^7.4",
+    "symfony/resend-mailer": "^7.4",
+    "symfony/mailgun-mailer": "^7.4",
+    "symfony/sendgrid-mailer": "^7.4",
+    "symfony/postmark-mailer": "^7.4",
+    "symfony/brevo-mailer": "^7.4",
+    "symfony/mime": "^7.4",
+    "symfony/event-dispatcher": "^7.4"
+  },
+  "config": {
+    "allow-plugins": false,
+    "sort-packages": true,
+    "platform": {
+      "php": "8.2.0"
+    }
+  }
+}
