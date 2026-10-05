@@ -5,6 +5,7 @@ declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
 require __DIR__.'/../Application/ConnectionStore.php';
+require __DIR__.'/../Application/NativeDsnGuard.php';
 
 use MauticPlugin\MauticMultiMailBundle\Application\ConnectionStore;
 
@@ -80,6 +81,16 @@ try {
     $last = $view['connections'][count($view['connections']) - 1]['id'];
     $removed = $store->remove($last, $revision);
     check(count($removed['connections']) === 7, 'Remove unreferenced connection');
+    $nativeInput = array_replace($input, ['provider' => 'native', 'name' => 'Installed transport', 'settings' => [],
+        'secrets' => ['dsn' => 'failover(smtp://user:unit-secret@smtp.example.com:587 null://default)']]);
+    $nativeView = $store->save($nativeInput, $removed['revision'], 8);
+    $nativeId = $nativeView['connections'][array_key_last($nativeView['connections'])]['id'];
+    check(!str_contains(json_encode($nativeView), 'unit-secret'), 'Native DSN never exposed');
+    refuses(fn() => $store->save(array_replace($nativeInput, ['id' => $nativeId, 'fallback' => $idA]), $nativeView['revision'], 8));
+    refuses(fn() => $store->save(array_replace($input, ['id' => $idA, 'fallback' => $nativeId]), $nativeView['revision'], 8));
+    foreach (['multimail://'.$idA, 'failover(smtp://user:unit-secret@smtp.example.com MULTIMAIL://'.$idA.')', 'invalid', "smtp://user:unit-secret@host\r\n"] as $dsn) {
+        refuses(fn() => $store->save(array_replace($nativeInput, ['secrets' => ['dsn' => $dsn]]), $nativeView['revision'], 8));
+    }
     chmod($private.'/connections.json', 0644);
     refuses(fn() => $store->overview(), RuntimeException::class);
     chmod($private.'/connections.json', 0600);

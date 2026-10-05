@@ -7,6 +7,16 @@
         const select = form.querySelector('select[name="provider"]');
         if (select) {
             const syncProvider = function () {
+                const native = select.value === 'native';
+                const fallback = form.querySelector('#mail-fallback');
+                if (fallback) {
+                    fallback.disabled = native;
+                    if (native) fallback.value = '';
+                    const query = window.mQuery || window.jQuery;
+                    if (query) query(fallback).trigger('chosen:updated');
+                }
+                const nativeHelp = form.querySelector('#mail-native-fallback-help');
+                if (nativeHelp) nativeHelp.hidden = !native;
                 form.querySelectorAll('[data-mail-provider]').forEach(function (section) {
                     const active = section.dataset.mailProvider === select.value;
                     section.hidden = !active;

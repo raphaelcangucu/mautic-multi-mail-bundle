@@ -8,6 +8,8 @@ use Mautic\PluginBundle\Bundle\PluginBundleBase;
 
 final class MauticMultiMailBundle extends PluginBundleBase
 {
+    public const MINIMUM_MAUTIC_VERSION = '7.2.0-rc';
+
     public function __construct()
     {
         // Load in every kernel boot, including when its container is already cached.

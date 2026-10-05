@@ -49,12 +49,12 @@
                     </div>
                 </div>
                 <div class="row">
-                    <div class="col-md-6 form-group"><label for="mail-from-name">Nome do remetente</label><input class="form-control" id="mail-from-name" name="from_name" maxlength="150" value="{{ editing.from_name|default('Macro Markets') }}" required></div>
+                    <div class="col-md-6 form-group"><label for="mail-from-name">Nome do remetente</label><input class="form-control" id="mail-from-name" name="from_name" maxlength="150" value="{{ editing.from_name|default('Mautic') }}" required></div>
                     <div class="col-md-6 form-group"><label for="mail-from-email">E-mail do remetente</label><input type="email" class="form-control" id="mail-from-email" name="from_email" maxlength="254" value="{{ editing.from_email|default('') }}" placeholder="support@seu-dominio.com" required></div>
                 </div>
                 <div class="row">
                     <div class="col-md-6 form-group"><label for="mail-reply">Responder para <small class="text-muted">opcional</small></label><input type="email" class="form-control" id="mail-reply" name="reply_to" maxlength="254" value="{{ editing.reply_to|default('') }}"></div>
-                    <div class="col-md-6 form-group"><label for="mail-fallback">Conexão de fallback</label><select class="form-control" id="mail-fallback" name="fallback"><option value="">Sem fallback</option>{% for connection in data.connections %}{% if not editing or connection.id != editing.id %}<option value="{{ connection.id }}" {{ editing and connection.id == editing.fallback ? 'selected' : '' }}>{{ connection.name }} · {{ providers[connection.provider].label }}</option>{% endif %}{% endfor %}</select><p class="help-block">A cadeia de reservas aparece na lista. Não é permitido voltar a uma conexão já presente na cadeia.</p></div>
+                    <div class="col-md-6 form-group"><label for="mail-fallback">Conexão de fallback</label><select class="form-control" id="mail-fallback" name="fallback" {{ provider == 'native' ? 'disabled' : '' }}><option value="">Sem fallback</option>{% for connection in data.connections %}{% if connection.provider != 'native' and (not editing or connection.id != editing.id) %}<option value="{{ connection.id }}" {{ editing and connection.id == editing.fallback ? 'selected' : '' }}>{{ connection.name }} · {{ providers[connection.provider].label }}</option>{% endif %}{% endfor %}</select><p class="help-block">A cadeia de reservas aparece na lista. Não é permitido voltar a uma conexão já presente na cadeia.</p><p class="help-block" id="mail-native-fallback-help" {{ provider != 'native' ? 'hidden' : '' }}>Para transporte nativo, configure as reservas com failover(...) no próprio DSN. Isso preserva o adaptador original e suas funções.</p></div>
                 </div>
                 {% for key, item in providers %}
                 <fieldset data-mail-provider="{{ key }}" {{ key != provider ? 'hidden' : '' }}>
@@ -70,10 +70,11 @@
                         </div>
                     {% endfor %}
                     {% for field in item.secrets %}
-                        {% set labels = {password: 'Senha SMTP', api_key: 'Chave da API', access_key: 'AWS Access Key ID', secret_key: 'AWS Secret Access Key'} %}
-                        <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label><input type="password" class="form-control" name="secrets[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="" maxlength="4096" autocomplete="new-password" placeholder="{{ editing ? 'Salva · deixe vazio para manter' : 'Informe a credencial' }}" {{ not editing ? 'required' : '' }} {{ key != provider ? 'disabled' : '' }}></div>
+                        {% set labels = {password: 'Senha SMTP', api_key: 'Chave da API', access_key: 'AWS Access Key ID', secret_key: 'AWS Secret Access Key', dsn: 'DSN do transporte instalado'} %}
+                        <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label><input type="password" class="form-control" name="secrets[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="" maxlength="{{ field == 'dsn' ? 16384 : 4096 }}" autocomplete="new-password" placeholder="{{ editing ? 'Salva · deixe vazio para manter' : 'Informe a credencial' }}" {{ not editing ? 'required' : '' }} {{ key != provider ? 'disabled' : '' }}></div>
                     {% endfor %}
                     </div>
+                    {% if key == 'native' %}<p class="help-block">Use o DSN do adaptador já instalado no Mautic, incluindo opções e credenciais codificadas. O plugin mantém o transporte original, inclusive interfaces de lote e bounces quando fornecidas pelo adaptador. O DSN fica privado; deixe vazio ao editar para mantê-lo.</p>{% endif %}
                 </fieldset>
                 {% endfor %}
                 <p class="help-block"><i class="ri-lock-line" aria-hidden="true"></i> Senhas e chaves ficam privadas no servidor e não são exibidas. Você controla a troca e a revogação; não há prazo automático.</p>
@@ -88,5 +89,5 @@
         </div>
     </div>
 </div>
-{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=2', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
+{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=3', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
 {% endblock %}

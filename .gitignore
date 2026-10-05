@@ -1,3 +1,10 @@
 /vendor/
 /build/dependencies/vendor/
 /dist/
+
+.env
+.env.*
+/connections.json
+/connections.lock
+/*-private/
+/.DS_Store

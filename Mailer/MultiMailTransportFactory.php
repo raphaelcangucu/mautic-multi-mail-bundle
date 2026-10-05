@@ -12,7 +12,8 @@ use Symfony\Component\Mailer\Transport\{Dsn, TransportFactoryInterface, Transpor
 final class MultiMailTransportFactory implements TransportFactoryInterface
 {
     public function __construct(private readonly ConnectionStore $store, private readonly ConnectionBuilder $builder,
-        private readonly ?EventDispatcherInterface $dispatcher = null)
+        private readonly ?EventDispatcherInterface $dispatcher = null,
+        private readonly ?NativeTransportResolver $native = null)
     {
     }
 
@@ -28,9 +29,19 @@ final class MultiMailTransportFactory implements TransportFactoryInterface
             throw new InvalidArgumentException('Use apenas o identificador da conexão no transporte Multi Mail.');
         }
 
-        try { $ids = array_column($this->store->overview()['connections'], 'id'); }
+        try { $connections = $this->store->overview()['connections']; $ids = array_column($connections, 'id'); }
         catch (\Throwable) { throw new InvalidArgumentException('Multi Mail: configuração privada indisponível.'); }
         if (!in_array($dsn->getHost(), $ids, true)) { throw new InvalidArgumentException('Multi Mail: conexão não cadastrada.'); }
+
+        foreach ($connections as $connection) {
+            if ($connection['id'] === $dsn->getHost() && $connection['provider'] === 'native') {
+                if ($this->native === null) { throw new InvalidArgumentException('Fábrica nativa do Mautic indisponível.'); }
+                try { $private = $this->store->transportChain($connection['id'])[0]; }
+                catch (\Throwable) { throw new InvalidArgumentException('Multi Mail: configuração privada indisponível.'); }
+
+                return $this->native->resolve($private['secrets']['dsn']);
+            }
+        }
 
         return new ConnectionTransport($dsn->getHost(), $this->store, $this->builder, $this->dispatcher);
     }

@@ -17,6 +17,7 @@ final class ConnectionStore
         'sendgrid' => ['label' => 'SendGrid · API', 'settings' => [], 'secrets' => ['api_key']],
         'postmark' => ['label' => 'Postmark · API', 'settings' => [], 'secrets' => ['api_key']],
         'brevo' => ['label' => 'Brevo · API', 'settings' => [], 'secrets' => ['api_key']],
+        'native' => ['label' => 'Mautic · transporte nativo / DSN', 'settings' => [], 'secrets' => ['dsn']],
     ];
 
     public function __construct(#[Autowire('%kernel.project_dir%')] private readonly string $projectDir)
@@ -99,7 +100,7 @@ final class ConnectionStore
                 }
                 // Empty password fields preserve an existing secret; public views never contain it.
                 $value = $value === '' ? ($previous['secrets'][$key] ?? '') : $value;
-                $connection['secrets'][$key] = $this->text($value, 'Credencial', 4096, false);
+                $connection['secrets'][$key] = $this->text($value, 'Credencial', $key === 'dsn' ? 16384 : 4096, false);
             }
             $this->validateProvider($connection);
             $data['connections'][$id] = $connection;
@@ -133,6 +134,12 @@ final class ConnectionStore
     {
         $settings = $connection['settings'];
         switch ($connection['provider']) {
+            case 'native':
+                NativeDsnGuard::validate($connection['secrets']['dsn']);
+                if ($connection['fallback'] !== '') {
+                    throw new \InvalidArgumentException('Defina as reservas no próprio DSN nativo, usando failover(...).');
+                }
+                break;
             case 'smtp':
                 if (!preg_match('/^(?=.{1,253}$)[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$/Di', $settings['host'])
                     || !in_array($settings['port'], ['465', '587', '2525'], true)
@@ -167,6 +174,9 @@ final class ConnectionStore
             while ($next !== '') {
                 if (!isset($connections[$next])) {
                     throw new \InvalidArgumentException('Escolha uma conexão existente como fallback.');
+                }
+                if ($connections[$next]['provider'] === 'native') {
+                    throw new \InvalidArgumentException('Transportes nativos mantêm sua própria cadeia de envio e não podem ser reserva de conexões Multi Mail.');
                 }
                 if (isset($seen[$next])) {
                     throw new \InvalidArgumentException('O fallback cria um ciclo. Escolha outra conexão.');

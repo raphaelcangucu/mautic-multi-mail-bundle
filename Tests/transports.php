@@ -4,13 +4,8 @@ declare(strict_types=1);
 
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
-// Standalone test: mocked HTTP, simulated SMTP, temporary filesystem; no Mautic kernel/database.
-require is_file(__DIR__.'/../build/dependencies/vendor/autoload.php')
-    ? __DIR__.'/../build/dependencies/vendor/autoload.php' : __DIR__.'/../vendor/autoload.php';
-spl_autoload_register(function (string $class): void {
-    $prefix = 'MauticPlugin\\MauticMultiMailBundle\\';
-    if (str_starts_with($class, $prefix)) { require __DIR__.'/../'.str_replace('\\', '/', substr($class, strlen($prefix))).'.php'; }
-});
+// Standalone: mocked HTTP, simulated SMTP, temporary filesystem only.
+require __DIR__.'/bootstrap.php';
 
 use MauticPlugin\MauticMultiMailBundle\Application\ConnectionStore;
 use MauticPlugin\MauticMultiMailBundle\Mailer\{ConnectionBuilder, MultiMailTransportFactory, ConfirmedSmtpTransport};
