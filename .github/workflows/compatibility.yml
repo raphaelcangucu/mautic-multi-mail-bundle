@@ -39,6 +39,7 @@ jobs:
       - run: node Tests/connections-ui.cjs
       - run: php Tests/connections.php
       - run: php Tests/transports.php
+      - run: php Tests/provider-transports.php
       - run: php Tests/native-compatibility.php
       - run: php Tests/example-sending.php
       - run: python3 build/package.py

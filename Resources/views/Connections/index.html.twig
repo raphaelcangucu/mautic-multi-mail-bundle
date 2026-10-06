@@ -94,15 +94,16 @@
                         {% set value = editing and key == provider ? editing.settings[field]|default('') : '' %}
                         <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label>
                         {% if field == 'encryption' %}<select class="form-control" name="settings[{{ field }}]" id="mail-{{ key }}-{{ field }}" {{ key != provider ? 'disabled' : '' }}><option value="tls" {{ value == 'tls' ? 'selected' : '' }}>STARTTLS · 587 ou 2525</option><option value="ssl" {{ value == 'ssl' ? 'selected' : '' }}>SSL/TLS · 465</option></select>
-                        {% elseif field == 'region' and key == 'mailgun' %}<select class="form-control" name="settings[region]" id="mail-mailgun-region" {{ key != provider ? 'disabled' : '' }}><option value="us" {{ value == 'us' ? 'selected' : '' }}>Estados Unidos</option><option value="eu" {{ value == 'eu' ? 'selected' : '' }}>Europa</option></select>
+                        {% elseif field == 'region' and key in ['mailgun', 'sparkpost'] %}<select class="form-control" name="settings[region]" id="mail-{{ key }}-region" {{ key != provider ? 'disabled' : '' }}><option value="us" {{ value == 'us' ? 'selected' : '' }}>Estados Unidos</option><option value="eu" {{ value == 'eu' ? 'selected' : '' }}>Europa</option></select>
                         {% else %}<input class="form-control" name="settings[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="{{ value ?: (field == 'port' ? '587' : '') }}" placeholder="{{ field == 'region' and key == 'ses' ? 'sa-east-1' : '' }}" maxlength="253" required {{ key != provider ? 'disabled' : '' }}>{% endif %}
                         </div>
                     {% endfor %}
                     {% for field in item.secrets %}
                         {% set labels = {password: 'Senha SMTP', api_key: 'Chave da API', access_key: 'AWS Access Key ID', secret_key: 'AWS Secret Access Key', dsn: 'DSN do transporte instalado'} %}
-                        <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label><input type="password" class="form-control" name="secrets[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="" maxlength="{{ field == 'dsn' ? 16384 : 4096 }}" autocomplete="new-password" placeholder="{{ editing ? 'Salva · deixe vazio para manter' : 'Informe a credencial' }}" {{ not editing ? 'required' : '' }} {{ key != provider ? 'disabled' : '' }}></div>
+                        <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ key == 'mailjet' and field == 'secret_key' ? 'mautic.multimail.mailjet.secret'|trans : labels[field] }}</label><input type="password" class="form-control" name="secrets[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="" maxlength="{{ field == 'dsn' ? 16384 : 4096 }}" autocomplete="new-password" placeholder="{{ editing ? 'Salva · deixe vazio para manter' : 'Informe a credencial' }}" {{ not editing ? 'required' : '' }} {{ key != provider ? 'disabled' : '' }}></div>
                     {% endfor %}
                     </div>
+                    {% if key in ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go'] %}<p class="help-block">{{ ('mautic.multimail.provider.' ~ key ~ '.help')|trans }}</p>{% endif %}
                     {% if key == 'native' %}<p class="help-block">Use o DSN do adaptador já instalado no Mautic, incluindo opções e credenciais codificadas. O plugin mantém o transporte original, inclusive interfaces de lote e bounces quando fornecidas pelo adaptador. O DSN fica privado; deixe vazio ao editar para mantê-lo.</p>{% endif %}
                 </fieldset>
                 {% endfor %}

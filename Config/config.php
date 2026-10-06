@@ -7,7 +7,7 @@ use MauticPlugin\MauticMultiMailBundle\Controller\ConnectionsController;
 return [
     'name' => 'Multi Mail',
     'description' => 'Contas SMTP e APIs com fallback por conexão para o envio nativo do Mautic.',
-    'version' => '0.2.0',
+    'version' => '0.3.0',
     'author' => 'Raphael Cangucu',
     'routes' => ['main' => [
         'mautic_multimail_connections' => ['path' => '/mail-connections', 'controller' => ConnectionsController::class.'::index', 'method' => ['GET', 'POST']],

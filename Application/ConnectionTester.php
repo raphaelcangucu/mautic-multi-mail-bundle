@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\MauticMultiMailBundle\Application;
 
-use MauticPlugin\MauticMultiMailBundle\Mailer\{ConnectionBuilder, NativeTransportResolver};
+use MauticPlugin\MauticMultiMailBundle\Mailer\{ConnectionBuilder, NativeTransportResolver, ProviderResponseException};
 use Symfony\Component\Mailer\Exception\HttpTransportException;
 use Symfony\Component\Mime\{Address, Email};
 
@@ -51,12 +51,14 @@ final class ConnectionTester
                 $result['provider_message_id'] = $messageId;
             }
             if ($attempt?->httpStatus() !== null) { $result['http_status'] = $attempt->httpStatus(); }
+            if ($attempt?->providerMessageId() !== null) { $result['provider_message_id'] = $attempt->providerMessageId(); }
             // Acceptance means provider handoff, not confirmed delivery to the recipient's inbox.
             return $result;
         } catch (\Throwable $exception) {
             // Never return provider debug output, authentication data or DSNs.
             $httpStatus = $attempt?->httpStatus();
             $rejected = !$invoked || ($attempt !== null && $attempt->confirmedNotAccepted());
+            if ($exception instanceof ProviderResponseException) { $rejected = $exception->rejected; }
             if ($connection['provider'] === 'resend' && in_array($httpStatus, [400, 404, 405, 422], true)) { $rejected = true; }
             $result = ['status' => $rejected ? 'rejected' : 'uncertain', 'reference' => $reference];
             if ($httpStatus !== null) { $result['http_status'] = $httpStatus; }

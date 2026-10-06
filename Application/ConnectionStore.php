@@ -17,6 +17,11 @@ final class ConnectionStore
         'sendgrid' => ['label' => 'SendGrid · API', 'settings' => [], 'secrets' => ['api_key']],
         'postmark' => ['label' => 'Postmark · API', 'settings' => [], 'secrets' => ['api_key']],
         'brevo' => ['label' => 'Brevo · API', 'settings' => [], 'secrets' => ['api_key']],
+        'mailjet' => ['label' => 'Mailjet · API', 'settings' => [], 'secrets' => ['api_key', 'secret_key']],
+        'mailersend' => ['label' => 'MailerSend · API', 'settings' => [], 'secrets' => ['api_key']],
+        'mandrill' => ['label' => 'Mandrill · Mailchimp Transactional', 'settings' => [], 'secrets' => ['api_key']],
+        'sparkpost' => ['label' => 'SparkPost · API', 'settings' => ['region'], 'secrets' => ['api_key']],
+        'smtp2go' => ['label' => 'SMTP2GO · API', 'settings' => [], 'secrets' => ['api_key']],
         'native' => ['label' => 'Mautic · transporte nativo / DSN', 'settings' => [], 'secrets' => ['dsn']],
     ];
 
@@ -162,6 +167,11 @@ final class ConnectionStore
             case 'resend':
                 if (!preg_match('/^re_[A-Za-z0-9_-]{20,}$/D', $connection['secrets']['api_key'])) {
                     throw new \InvalidArgumentException('Chave Resend inválida.');
+                }
+                break;
+            case 'sparkpost':
+                if (!in_array($settings['region'], ['us', 'eu'], true)) {
+                    throw new \InvalidArgumentException('Escolha a região SparkPost US ou EU.');
                 }
                 break;
         }

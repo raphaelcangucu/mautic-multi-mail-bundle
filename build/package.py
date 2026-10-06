@@ -4,7 +4,7 @@ import subprocess
 import os
 
 root = Path(__file__).resolve().parents[1]
-output = root / 'dist' / 'Mautic-Multi-Mail-v0.2.0.zip'
+output = root / 'dist' / 'Mautic-Multi-Mail-v0.3.0.zip'
 output.parent.mkdir(exist_ok=True)
 vendor = root / 'build' / 'dependencies' / 'vendor'
 if not (vendor / 'autoload.php').is_file():

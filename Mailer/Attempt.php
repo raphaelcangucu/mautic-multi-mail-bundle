@@ -28,4 +28,9 @@ final class Attempt
             try { $this->transport->stop(); } catch (\Throwable) { /* Shutdown must not change a send's result. */ }
         }
     }
+
+    public function providerMessageId(): ?string
+    {
+        return $this->outcome instanceof OutcomeHttpClient ? $this->outcome->providerMessageId() : null;
+    }
 }
