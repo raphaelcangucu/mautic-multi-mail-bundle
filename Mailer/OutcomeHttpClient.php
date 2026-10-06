@@ -41,4 +41,9 @@ final class OutcomeHttpClient implements HttpClientInterface
         // Never retry an HTTP timeout, a 5xx or a successful acceptance on another provider.
         return in_array($this->lastStatus, [401, 403, 429], true);
     }
+
+    public function statusCode(): ?int
+    {
+        return $this->lastStatus;
+    }
 }

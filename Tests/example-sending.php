@@ -14,10 +14,24 @@ namespace Mautic\CoreBundle\Helper {
         public function getUser(bool $force = false): object { return new class($this->admin) {
             public function __construct(private bool $admin) {}
             public function isAdmin(): bool { return $this->admin; }
+            public function getEmail(): string { return 'operator@example.com'; }
         }; }
     }
     class CoreParametersHelper {
         public function get(string $name): string { return 'smtp://unit-user:unit-secret@example.com'; }
+    }
+}
+namespace Mautic\CoreBundle\Controller {
+    class CommonController {
+        public bool $validCsrf = true;
+        public array $viewArguments = [];
+        protected function isCsrfTokenValid(string $id, mixed $token): bool { return $this->validCsrf; }
+        protected function createAccessDeniedException(): \RuntimeException { return new \RuntimeException('denied'); }
+        protected function createNotFoundException(string $message): \RuntimeException { return new \RuntimeException($message); }
+        protected function generateUrl(string $route): string { return '/s/mail-connections'; }
+        protected function delegateView(array $arguments): \Symfony\Component\HttpFoundation\Response {
+            $this->viewArguments = $arguments; return new \Symfony\Component\HttpFoundation\Response('view');
+        }
     }
 }
 namespace Mautic\EmailBundle\Form\Type {
@@ -49,6 +63,9 @@ namespace {
     use Symfony\Component\HttpClient\MockHttpClient;
     use Symfony\Component\HttpClient\Response\MockResponse;
     use Symfony\Component\HttpFoundation\{Request, RequestStack};
+    use Symfony\Component\HttpFoundation\Session\Session;
+    use Symfony\Component\HttpFoundation\Session\Storage\MockArraySessionStorage;
+    use MauticPlugin\MauticMultiMailBundle\Controller\ConnectionsController;
     use Symfony\Component\Mailer\{Transport, SentMessage};
     use Symfony\Component\Mailer\Transport\{AbstractTransport, Dsn};
     use Symfony\Component\Mailer\Exception\TransportException;
@@ -91,20 +108,71 @@ namespace {
         $reserve = $view['connections'][0]['id'];
         $view = $store->save(array_replace($input, ['fallback' => $reserve]), 1, 1);
         $selected = $view['connections'][1]['id'];
-        $calls = []; $status = 200;
-        $http = new MockHttpClient(function ($method, $url, $options) use (&$calls, &$status) {
+        $calls = []; $status = 200; $responseBody = null; $timeout = false;
+        $providerId = '37e4414c-5e25-4dbc-a071-43552a4bd53b';
+        $http = new MockHttpClient(function ($method, $url, $options) use (&$calls, &$status, &$responseBody, &$timeout, $providerId) {
+            checkExample($method === 'POST' && $url === 'https://api.resend.com/emails', 'Resend factory uses the official send endpoint');
+            checkExample(in_array('Authorization: Bearer re_synthetic-secret-abcdefghijklmnop', $options['headers'], true), 'Saved key reaches only the provider Authorization header');
             $calls[] = json_decode($options['body'], true);
-            return new MockResponse($status === 200 ? '{"id":"synthetic-provider-id"}' : '{"message":"synthetic-secret refusal"}', ['http_code' => $status]);
+            if ($timeout) { throw new \Symfony\Component\HttpClient\Exception\TransportException('synthetic-secret timeout'); }
+            return new MockResponse($responseBody ?? ($status === 200 ? json_encode(['id' => $providerId]) : '{"name":"validation_error","message":"synthetic-secret refusal"}'), ['http_code' => $status]);
         });
         $builder = new ConnectionBuilder($http);
         $tester = new ConnectionTester($store, $builder);
         $result = $tester->send($selected, 'recipient@example.com', 2);
         checkExample($result['status'] === 'accepted' && count($calls) === 1, 'Selected connection accepts one diagnostic');
+        checkExample($result['http_status'] === 200 && $result['provider_message_id'] === $providerId, 'Accepted diagnostic retains the provider response ID and HTTP status');
         checkExample(str_contains($calls[0]['from'], 'Selected sender') && str_contains($calls[0]['from'], 'selected@example.com') && $calls[0]['reply_to'] === 'reply@example.com', 'Diagnostic uses saved From/Reply-To');
         $status = 401; $calls = [];
         checkExample($tester->send($selected, 'recipient@example.com', 2)['status'] === 'rejected' && count($calls) === 1, 'Diagnostic refusal must never send via reserve');
         $status = 503; $calls = [];
         checkExample($tester->send($selected, 'recipient@example.com', 2)['status'] === 'uncertain' && count($calls) === 1, 'Uncertain handoff must never retry');
+        foreach ([400, 401, 403, 404, 405, 422, 429] as $refused) {
+            $status = $refused; $calls = [];
+            $result = $tester->send($selected, 'recipient@example.com', 2);
+            checkExample($result['status'] === 'rejected' && $result['http_status'] === $refused
+                && $result['error_code'] === 'validation_error' && count($calls) === 1, 'Explicit refusal is observable without fallback');
+            checkExample(!str_contains(json_encode($result), 'synthetic-secret') && !isset($result['provider_message_id']), 'Error content and credentials are never exposed');
+        }
+        $status = 403; $responseBody = '{"name":"synthetic-secret","message":"private provider details"}';
+        checkExample($tester->send($selected, 'recipient@example.com', 2)['error_code'] === 'provider_error', 'Unknown error codes are redacted');
+        $responseBody = '<html>synthetic-secret</html>';
+        checkExample($tester->send($selected, 'recipient@example.com', 2)['error_code'] === 'provider_error', 'Non-JSON error bodies remain redacted');
+        $status = 200;
+        foreach (['<html>synthetic-secret</html>', '{"id":"synthetic-secret"}'] as $malformed) {
+            $responseBody = $malformed; $calls = [];
+            $result = $tester->send($selected, 'recipient@example.com', 2);
+            checkExample($result['status'] === 'uncertain' && $result['error_code'] === 'invalid_response'
+                && $result['http_status'] === 200 && count($calls) === 1 && !str_contains(json_encode($result), 'synthetic-secret'), 'Malformed acceptance never claims success or retries');
+        }
+        $timeout = true; $calls = [];
+        $result = $tester->send($selected, 'recipient@example.com', 2);
+        checkExample($result['status'] === 'uncertain' && !isset($result['http_status']) && count($calls) === 1, 'Network failures do not invent a provider response');
+        $timeout = false; $responseBody = null; $status = 200;
+
+        $controller = new ConnectionsController(); $operator = new UserHelper(); $translator = new Translator('en');
+        $session = new Session(new MockArraySessionStorage());
+        $post = new Request([], ['action' => 'test', 'id' => $selected, 'revision' => '2', 'recipient' => 'recipient@example.com'], [], [], [], ['REQUEST_METHOD' => 'POST']);
+        $post->setSession($session); $calls = [];
+        $response = $controller->index($post, $operator, $store, $tester, new CoreParametersHelper(), $translator);
+        $json = json_decode($response->getContent(), true);
+        checkExample($response->getStatusCode() === 200 && str_contains($response->headers->get('Content-Type'), 'application/json')
+            && $json['provider_message_id'] === $providerId && $json['http_status'] === 200 && count($calls) === 1, 'Controller returns the real bridge outcome as JSON');
+        $saved = $session->get('_multimail_last_test_result');
+        checkExample(!str_contains(json_encode($saved), 'recipient@example.com') && !str_contains(json_encode($saved), 'synthetic-secret'), 'Recoverable session result contains no recipient or credentials');
+        $get = new Request(['test' => $selected]); $get->setSession($session);
+        $controller->index($get, $operator, $store, $tester, new CoreParametersHelper(), $translator);
+        checkExample($controller->viewArguments['viewParameters']['lastTest']['result']['provider_message_id'] === $providerId && count($calls) === 1, 'Reload restores the latest outcome without sending again');
+        $get = new Request(['test' => $reserve]); $get->setSession($session);
+        $controller->index($get, $operator, $store, $tester, new CoreParametersHelper(), $translator);
+        checkExample($controller->viewArguments['viewParameters']['lastTest'] === null, 'Result is never attributed to a different connection');
+        $response = $controller->index($post, $operator, $store, $tester, new CoreParametersHelper(), $translator);
+        checkExample($response->getStatusCode() === 429 && count($calls) === 1, 'Repeated test is throttled before send');
+        $controller->validCsrf = false;
+        checkExample($controller->index($post, $operator, $store, $tester, new CoreParametersHelper(), $translator)->getStatusCode() === 403 && count($calls) === 1, 'Invalid controller CSRF cannot send');
+        $controller->validCsrf = true; $operator->admin = false;
+        try { $controller->index($post, $operator, $store, $tester, new CoreParametersHelper(), $translator); throw new \LogicException('Non-admin allowed'); }
+        catch (\RuntimeException $e) { checkExample($e->getMessage() === 'denied' && count($calls) === 1, 'Non-admin denied before send'); }
         $calls = [];
         foreach (["recipient@example.com\r\nBcc: victim@example.com", 'one@example.com,two@example.com', 'bad', str_repeat('a', 255).'@example.com'] as $invalid) {
             try { $tester->send($selected, $invalid, 2); throw new \RuntimeException('Invalid recipient accepted'); }
@@ -134,7 +202,7 @@ namespace {
             ->html('<p>Original HTML</p>')->text('Original plain text')->attach('attachment contents', 'test.txt', 'text/plain');
         $email->getHeaders()->addTextHeader('X-Transport', ExampleTransport::NAME);
         $email->getHeaders()->addTextHeader(ExampleTransport::HEADER, $selected);
-        checkExample($transports->send($email)->getMessageId() === 'synthetic-provider-id' && $global->calls === 0, 'Example uses selected connection, not global');
+        checkExample($transports->send($email)->getMessageId() === $providerId && $global->calls === 0, 'Example uses selected connection, not global');
         checkExample($calls[0]['from'] === 'original@example.com' && $calls[0]['html'] === '<p>Original HTML</p>' && count($calls[0]['attachments']) === 1, 'Native example preserves sender/body/attachments');
         checkExample(!str_contains(json_encode($calls[0]), 'X-MultiMail') && !str_contains(json_encode($calls[0]), 'X-Transport'), 'Routing headers never reach provider');
         $transports->send((new Email())->from('original@example.com')->to('recipient@example.com')->subject('Global')->text('Global'));

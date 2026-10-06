@@ -36,6 +36,7 @@ jobs:
       - run: find Application Config Controller DependencyInjection EventSubscriber Form Mailer Tests -name '*.php' -exec php -l '{}' ';'
       - run: php -l MauticMultiMailBundle.php
       - run: node --check Assets/js/connections.js
+      - run: node Tests/connections-ui.cjs
       - run: php Tests/connections.php
       - run: php Tests/transports.php
       - run: php Tests/native-compatibility.php

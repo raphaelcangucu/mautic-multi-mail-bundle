@@ -17,6 +17,11 @@ final class Attempt
         return $this->outcome->confirmedNotAccepted();
     }
 
+    public function httpStatus(): ?int
+    {
+        return $this->outcome instanceof OutcomeHttpClient ? $this->outcome->statusCode() : null;
+    }
+
     public function close(): void
     {
         if ($this->transport instanceof ConfirmedSmtpTransport) {

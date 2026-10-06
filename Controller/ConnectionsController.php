@@ -37,6 +37,20 @@ final class ConnectionsController extends CommonController
                 $session->set('_multimail_last_test', microtime(true));
                 $result = $tester->send($input['id'], $input['recipient'], (int) $input['revision']);
                 $result['message'] = $translator->trans('mautic.multimail.test.'.$result['status']);
+                $result['details'] = [];
+                if (isset($result['http_status'])) {
+                    $result['details'][] = $translator->trans('mautic.multimail.test.http', ['%status%' => $result['http_status']]);
+                }
+                if (isset($result['provider_message_id'])) {
+                    $result['details'][] = $translator->trans('mautic.multimail.test.provider_id', ['%id%' => $result['provider_message_id']]);
+                }
+                if (isset($result['error_code'])) {
+                    $result['details'][] = $translator->trans('mautic.multimail.test.provider_error', ['%code%' => $result['error_code']]);
+                }
+                // Recover a completed result after a lost HTTP response, without sending again.
+                // This session stores no recipient, message content or connection credentials.
+                $session->set('_multimail_last_test_result', ['connection_id' => $input['id'],
+                    'revision' => (int) $input['revision'], 'tested_at' => gmdate(DATE_ATOM), 'result' => $result]);
                 return new JsonResponse($result, $result['status'] === 'accepted' ? 200 : 502, ['Cache-Control' => 'private, no-store']);
             } catch (\DomainException) {
                 $message = 'mautic.multimail.test.stale'; $code = 409;
@@ -86,12 +100,15 @@ final class ConnectionsController extends CommonController
         if (!is_string($provider) || !isset(ConnectionStore::PROVIDERS[$provider])) { $provider = 'smtp'; }
         $transport = TransportStatus::describe($parameters->get('mailer_dsn'), $data['connections']);
         $testId = $request->query->get('test', $editId);
+        $lastTest = $request->hasSession() ? $request->getSession()->get('_multimail_last_test_result') : null;
+        if (!is_array($lastTest) || ($lastTest['connection_id'] ?? null) !== $testId
+            || ($lastTest['revision'] ?? null) !== $data['revision']) { $lastTest = null; }
         $response = $this->delegateView([
             'contentTemplate' => '@MauticMultiMail/Connections/index.html.twig',
             'passthroughVars' => ['mauticContent' => 'multimailconnections', 'route' => $this->generateUrl('mautic_multimail_connections')],
             'viewParameters' => ['data' => $data, 'editing' => $editing, 'provider' => $provider,
                 'providers' => ConnectionStore::PROVIDERS, 'error' => $error, 'saved' => $request->query->get('saved') === '1',
-                'transport' => $transport, 'testId' => $testId, 'testRecipient' => $user->getEmail()],
+                'transport' => $transport, 'testId' => $testId, 'testRecipient' => $user->getEmail(), 'lastTest' => $lastTest],
         ]);
         $response->setStatusCode($status);
         $response->headers->set('Cache-Control', 'private, no-store');

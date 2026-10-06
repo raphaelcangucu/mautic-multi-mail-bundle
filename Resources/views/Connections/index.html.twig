@@ -2,7 +2,7 @@
 {% block mauticContent %}multimailconnections{% endblock %}
 {% block headerTitle %}Multi Mail · Conexões de e-mail{% endblock %}
 {% block content %}
-<style>#mail-connections [hidden] { display: none !important; }</style>
+<style>#mail-connections [hidden] { display: none !important; } #mail-test-result { white-space: pre-line; overflow-wrap: anywhere; }</style>
 <div class="pa-md" id="mail-connections">
     {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
     {% if saved %}<div class="alert alert-success" role="status">Configuração salva.</div>{% endif %}
@@ -59,7 +59,7 @@
                 <p class="help-block"><strong>{{ 'mautic.multimail.test.from'|trans }}:</strong> <span id="mail-test-from">—</span><br><strong>{{ 'mautic.multimail.test.reply'|trans }}:</strong> <span id="mail-test-reply">—</span></p>
                 <button type="submit" class="btn btn-primary" {{ data.connections is empty ? 'disabled' : '' }}><i class="ri-send-plane-line" aria-hidden="true"></i> {{ 'mautic.multimail.test.send'|trans }}</button>
             </form>
-            <div id="mail-test-result" class="alert mt-md mb-0" role="status" aria-live="polite" hidden></div>
+            <div id="mail-test-result" class="alert {{ lastTest and lastTest.result.status == 'accepted' ? 'alert-success' : 'alert-warning' }} mt-md mb-0" role="status" aria-live="polite" data-connection="{{ lastTest.connection_id|default('') }}" {{ not lastTest ? 'hidden' : '' }}>{% if lastTest %}{{ lastTest.result.message }} · {{ lastTest.result.reference }}{% for detail in lastTest.result.details %}{{ '\n' }}{{ detail }}{% endfor %}{% endif %}</div>
         </div>
     </div>
     <div class="panel panel-default">
@@ -118,5 +118,5 @@
         </div>
     </div>
 </div>
-{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=4', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
+{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=5', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
 {% endblock %}

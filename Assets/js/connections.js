@@ -50,7 +50,7 @@
                 document.getElementById('mail-test-from').textContent = option?.dataset.from || '—';
                 document.getElementById('mail-test-reply').textContent = option?.dataset.reply || '—';
                 button.disabled = !connection.value;
-                result.hidden = true;
+                result.hidden = result.dataset.connection !== connection.value;
             };
             const query = window.mQuery || window.jQuery;
             if (query) query(connection).on('change.multimailtest', sync);
@@ -64,18 +64,23 @@
                 if (query) query(connection).trigger('chosen:updated');
                 result.className = 'alert alert-info mt-md mb-0';
                 result.textContent = test.dataset.pending;
+                result.dataset.connection = connection.value;
                 result.hidden = false;
                 test.setAttribute('aria-busy', 'true');
                 try {
                     // FormData omits disabled fields: pin the selected connection explicitly.
                     const data = new FormData(test);
                     data.set('id', connection.value);
-                    const response = await fetch(test.action, { method: 'POST', body: data,
+                    // A control named "action" can shadow HTMLFormElement.action.
+                    // Read the attribute so the request always targets the actual route.
+                    const response = await fetch(test.getAttribute('action'), { method: 'POST', body: data,
                         credentials: 'same-origin', headers: { 'Accept': 'application/json' }, redirect: 'error' });
                     const payload = await response.json();
                     if (typeof payload.message !== 'string') throw new Error('Invalid response');
                     result.className = 'alert ' + (payload.status === 'accepted' ? 'alert-success' : 'alert-warning') + ' mt-md mb-0';
-                    result.textContent = payload.message + (payload.reference ? ' · ' + payload.reference : '');
+                    const details = Array.isArray(payload.details) ? payload.details.filter(function (detail) { return typeof detail === 'string'; }) : [];
+                    result.textContent = payload.message + (payload.reference ? ' · ' + payload.reference : '')
+                        + (details.length ? '\n' + details.join('\n') : '');
                 } catch (_) {
                     result.className = 'alert alert-warning mt-md mb-0';
                     result.textContent = test.dataset.error;
