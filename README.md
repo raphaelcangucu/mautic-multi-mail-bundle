@@ -10,6 +10,16 @@ Administrator screen: `/s/mail-connections`. Connections are stored as private J
 
 ## Native Mautic sending
 
+### Test a connection and send native examples
+
+Each saved connection has **Test sending**. Choose a saved connection and one recipient in `/s/mail-connections`; the diagnostic uses that connection's saved From and Reply-To. It does not change the global Mautic configuration. The standalone diagnostic never invokes the registry fallback chain; a native DSN keeps its own explicitly configured composite. The result distinguishes acceptance, confirmed refusal and uncertain handoff. Acceptance is not a delivery receipt: check the recipient's inbox and spam. Do not retry an uncertain result without checking for delivery. Tests are administrator-only, protected by CSRF, optimistic revision checks and a ten-second session cooldown. No provider credentials or debug transcripts are returned.
+
+For administrators, the native email **Send example** modal now requires an explicit sending choice: a saved connection, or the current Mautic transport. Selecting a connection preserves the native email rendering, From, Reply-To, recipients, MIME and attachments. Only that connection's configured fallback applies; an unavailable or failed selection never silently uses the global transport. The selection applies only to this example and does not change campaign routing. Use a provider that authorizes the email's Mautic sender.
+
+The connections page shows the active global transport and marks a saved connection as active only when its ID exactly matches the configured `multimail://` DSN. Registering a connection alone still does not switch the global transport. No arbitrary connection is automatically promoted.
+
+Implementation uses a native Symfony named transport appended after the original transports, a form extension and Mautic's pre-send event. The original default transport and optional batching/bounce interfaces remain intact. Internal routing headers survive a Messenger queue and are removed before provider handoff. No Mautic core file is patched.
+
 Edit a connection to obtain its identifier. In Mautic's email transport configuration use scheme `multimail`, host `<connection-id>` and empty user/password/port: `multimail://<connection-id>`. Saving the connection registry does not activate the global transport. Activation is an explicit operator decision. Mautic keeps its configured From, Reply-To, recipient envelope, MIME, attachments and tracking headers. All configured providers must authorize the sender used by Mautic.
 
 Applications using the injected native Mautic mail helper/transport factory can reuse this transport. Symfony's static `Transport::fromDsn()` does not discover registered plugin factories; use the application's injected factory instead. Existing custom login transports continue using their current configuration until explicitly switched.
@@ -31,6 +41,8 @@ SMTP requires TLS. Failures before DATA acceptance or explicit final 4xx/5xx ref
 New bounce, complaint, delivery webhook processing or provider callback endpoints are not added by this plugin. Native mode preserves the original adapter and its existing interfaces/configuration; the six bundled standard Symfony API bridges do not add Mautic-specific batch/callback features. Configuration storage and native sending are the current scope. A configured API bridge is not proof of credentials, sender verification, SES production access or end-to-end delivery.
 
 ## Validation
+
+`php Tests/example-sending.php` adds pure diagnostic/routing tests with mocked HTTP, synthetic connections and real Symfony form/CSRF/choice validation. It proves that invalid recipients, stale revisions, invalid CSRF, forged choices and non-admin requests do not select a transport, a failed choice cannot use the global transport, routing headers do not reach the provider, and native MIME/attachments remain intact. Install the isolated development dependencies first. The runtime ZIP excludes these extra test dependencies.
 
 `php Tests/connections.php` tests private storage, credentials, revisions, fallback graph and atomic releases. After `composer install --working-dir=build/dependencies`, `php Tests/transports.php` tests official transport construction, mocked Resend sending/fallback, MIME payload/envelope, event counts and simulated SMTP acceptance boundaries. `php Tests/native-compatibility.php` compares the original factory registry with and without Multi Mail, exercises native composites, compiles the lazy dependency graph, and checks transport object identity, batching/bounce/unsubscription interfaces and private DSN preservation. Tests use temporary filesystem data, mocked HTTP and a simulated stream. They never boot a Mautic kernel, connect to a database or send network traffic.
 

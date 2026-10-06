@@ -30,13 +30,14 @@ final class ConnectionStore
     }
 
     /** Internal server use only; never expose this result through a controller. */
-    public function transportChain(string $id): array
+    public function transportChain(string $id, ?int $revision = null): array
     {
         if (!preg_match('/^[a-f0-9]{32}$/D', $id)) {
             throw new \InvalidArgumentException('Conexão de envio inválida.');
         }
 
-        return $this->transaction(function (array $data) use ($id): array {
+        return $this->transaction(function (array $data) use ($id, $revision): array {
+            if ($revision !== null) { $this->checkRevision($data, $revision); }
             $result = [];
             $next = $id;
             $seen = [];
