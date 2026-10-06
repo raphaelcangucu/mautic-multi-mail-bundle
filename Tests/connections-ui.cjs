@@ -70,6 +70,28 @@ async function main() {
     assert.equal(button.disabled, false); assert.equal(connection.disabled, false);
     connection.value = 'b'.repeat(32); handlers['connection:change']();
     assert.equal(result.hidden, true, 'Result does not follow a different connection');
+    // Chosen was initialized while another provider's region select was disabled.
+    const providerHandlers = {}, updates = [];
+    const provider = { value: 'mailjet' };
+    const region = { tagName: 'SELECT', type: 'select-one', disabled: true };
+    const secret = { tagName: 'INPUT', type: 'password', disabled: false, value: 'typed-only-secret' };
+    const sections = [
+        { dataset: { mailProvider: 'mailjet' }, querySelectorAll: selector => selector === 'input, select' ? [secret] : [] },
+        { dataset: { mailProvider: 'sparkpost' }, querySelectorAll: selector => selector === 'input, select' ? [region] : [] },
+    ];
+    const providerForm = { dataset: {}, querySelector: selector => selector === 'select[name="provider"]' ? provider : null,
+        querySelectorAll: () => sections };
+    const providerContext = { window: { jQuery: element => ({ on: (event, fn) => { providerHandlers[event] = fn; }, trigger: event => updates.push([element, event, element.disabled]) }) },
+        document: { readyState: 'complete', getElementById: id => id === 'mail-connection-form' ? providerForm : null, querySelector: () => null } };
+    vm.runInNewContext(fs.readFileSync(__dirname + '/../Assets/js/connections.js', 'utf8'), providerContext);
+    assert.equal(region.disabled, true);
+    provider.value = 'sparkpost'; providerHandlers['change.multimailconnections']();
+    assert.equal(region.disabled, false); assert.equal(sections[1].hidden, false);
+    assert.equal(secret.disabled, true); assert.equal(secret.value, '', 'Hidden credentials are cleared');
+    assert.ok(updates.some(([element, event, disabled]) => element === region && event === 'chosen:updated' && !disabled), 'Chosen region receives the new enabled state');
+    provider.value = 'mailjet'; providerHandlers['change.multimailconnections']();
+    assert.equal(region.disabled, true);
+    assert.ok(updates.some(([element, event, disabled]) => element === region && event === 'chosen:updated' && disabled), 'Inactive Chosen regions receive the disabled state');
     console.log('PASS: correct endpoint despite named action input, selected ID in FormData, double-submit guard, literal results, provider details, lost-response guidance and session-result visibility; no browser/network/database');
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

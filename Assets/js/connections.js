@@ -24,6 +24,9 @@
                         field.disabled = !active;
                         // Do not leave typed secrets in hidden provider fields.
                         if (!active && field.type === 'password') field.value = '';
+                        // Chosen keeps a separate disabled state when an inactive provider becomes active.
+                        const query = window.mQuery || window.jQuery;
+                        if (field.tagName === 'SELECT' && query) query(field).trigger('chosen:updated');
                     });
                     if (active) {
                         section.querySelectorAll('.chosen-container').forEach(function (chosen) { chosen.style.width = '100%'; });
