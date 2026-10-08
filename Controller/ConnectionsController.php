@@ -19,6 +19,16 @@ final class ConnectionsController extends CommonController
         if (!$user?->isAdmin()) {
             throw $this->createAccessDeniedException();
         }
+        if ($request->isMethod('GET') && $request->query->get('usage') === '1') {
+            try {
+                $data = $store->overview();
+                $connections = array_map(fn(array $connection): array => ['id' => $connection['id'], 'name' => $connection['name'],
+                    'priority' => $connection['priority'], 'hourly' => $connection['hourly']], $data['connections']);
+                return new JsonResponse(['connections' => $connections, 'checked_at' => gmdate(DATE_ATOM)], 200, ['Cache-Control' => 'private, no-store']);
+            } catch (\Throwable) {
+                return new JsonResponse(['message' => $translator->trans('mautic.multimail.quota.unavailable')], 503, ['Cache-Control' => 'private, no-store']);
+            }
+        }
         if ($request->isMethod('POST') && $request->request->get('action') === 'test') {
             if (!$this->isCsrfTokenValid('multimail_connections', $request->request->get('_token', ''))) {
                 return new JsonResponse(['status' => 'invalid', 'message' => $translator->trans('mautic.multimail.test.csrf')], 403);
@@ -51,7 +61,7 @@ final class ConnectionsController extends CommonController
                 // This session stores no recipient, message content or connection credentials.
                 $session->set('_multimail_last_test_result', ['connection_id' => $input['id'],
                     'revision' => (int) $input['revision'], 'tested_at' => gmdate(DATE_ATOM), 'result' => $result]);
-                return new JsonResponse($result, $result['status'] === 'accepted' ? 200 : 502, ['Cache-Control' => 'private, no-store']);
+                return new JsonResponse($result, $result['status'] === 'accepted' ? 200 : ($result['status'] === 'quota' ? 429 : 502), ['Cache-Control' => 'private, no-store']);
             } catch (\DomainException) {
                 $message = 'mautic.multimail.test.stale'; $code = 409;
             } catch (\InvalidArgumentException) {
@@ -82,7 +92,7 @@ final class ConnectionsController extends CommonController
 
                 return $this->redirectToRoute('mautic_multimail_connections', ['saved' => 1], 303);
             } catch (\InvalidArgumentException $exception) {
-                $error = $exception->getMessage(); $status = 422;
+                $error = $translator->trans($exception->getMessage()); $status = 422;
             } catch (\DomainException $exception) {
                 $error = $exception->getMessage(); $status = 409;
             } catch (\Throwable) {
@@ -91,6 +101,7 @@ final class ConnectionsController extends CommonController
         }
         try { $data = $store->overview(); }
         catch (\Throwable) { throw $this->createNotFoundException('Configuração de e-mail indisponível.'); }
+        usort($data['connections'], fn(array $a, array $b): int => [$a['priority'], $a['id']] <=> [$b['priority'], $b['id']]);
         $editId = $request->query->get('edit', '');
         $editing = null;
         foreach ($data['connections'] as $connection) {

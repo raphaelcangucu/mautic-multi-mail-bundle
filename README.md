@@ -1,6 +1,6 @@
 # Multi Mail for Mautic
 
-Independent Mautic 7.2 / Symfony Mailer 7.4 plugin (v0.3.0) for multiple SMTP and API connections, with an ordered fallback chain per connection. No Inbox dependency, no core patch, no campaign/use-case routing and no automatic credential expiry.
+Independent Mautic 7.2 / Symfony Mailer 7.4 plugin (v0.4.0) for multiple SMTP and API connections, with an ordered fallback chain per connection. No Inbox dependency, no core patch, no campaign/use-case segmentation and no automatic credential expiry.
 
 ## Install
 
@@ -26,6 +26,28 @@ Success validation runs before an official bridge can treat an HTTP 200/202 as a
 
 Setup references: [Mailjet](https://dev.mailjet.com/docs/email-api/send-api-v31/send-basic-email), [MailerSend](https://developers.mailersend.com/api/v1/email), [Mandrill](https://mailchimp.com/developer/transactional/api/messages/send-new-message/), [SparkPost](https://developers.sparkpost.com/api/transmissions/), [SMTP2GO](https://developers.smtp2go.com/reference/send-standard-email).
 
+## Hourly quotas and automatic sending rotation
+
+![Connection priorities, rolling-hour capacity and shared API/SMTP quota](docs/screenshots/hourly-capacity.png)
+
+Each SMTP/API connection has an editable recipient limit per rolling hour, priority and participation toggle. `0` means unlimited. Lower priorities are used first. Configure the account limit from your provider contract; the plugin does not assume all accounts or plans have the same allowance. Multiple connections to the same service are supported. The UI shows used/remaining capacity, available/capped status, next capacity time and 24-hour per-connection acceptance, pending reservation, uncertainty and rejection history. Refreshing counters is an authenticated, administrator-only, no-store GET and does not submit the credential form.
+
+Use the same **Shared quota account** identifier for API/SMTP or multiple credentials belonging to one provider account. Their quota is combined and the lowest positive member limit applies, even if one member is set to unlimited or excluded from automatic rotation. Per-connection acceptance counts remain separate. Changes to a charged connection’s quota group are refused until its last-hour usage clears, preventing edits from silently resetting its used allowance. Removing an account does not erase its counters. Blank fields preserve secrets and saves still check the registry revision.
+
+Global transport `multimail://auto` enables rotation for native Mautic sending, including campaigns and examples sent using the global transport. Configure scheme `multimail`, host `auto` and empty credentials/port in Mautic email settings. The first enabled SMTP/API connection with enough capacity for **all** envelope recipients is used; a capped connection is skipped before network handoff. The message is not split. Ordinary unsigned emails use each selected connection’s saved From/Reply-To and envelope sender, retaining content, tracking, unsubscribe headers and attachments according to that provider’s adapter. Signed/raw messages retain their existing MIME and sender; those sender identities must be authorized by the selected providers. Explicit `multimail://<id>` choices preserve Mautic’s sender and follow only that connection’s configured reserves, while obeying the same quotas. The standalone diagnostic also charges capacity but never uses reserves.
+
+Quota reservations use a private, atomic JSON ledger protected by the same filesystem security policy as credentials, with a separate process-wide file lock. Concurrent PHP workers reserve recipient capacity before sending and hold no filesystem lock while contacting a provider. Accepted and uncertain handoffs retain their charge; confirmed non-acceptance releases it. Finalizing a successful send cannot turn it into a failure/retry if the ledger becomes unavailable: its persisted reservation stays conservative. Unfinished reservations are retained conservatively for up to the 24-hour ledger retention, rather than assuming a crashed worker did not send. Completed charges move to the provider-handoff completion minute. Rolling minute buckets retain the overlapping oldest minute, so reopening capacity can be delayed by up to 60 seconds; wall-clock hour changes cannot reset the quota early.
+
+When all eligible connections are capped, no provider request occurs. A typed quota exception triggers the plugin’s campaign-failure subscriber, which supplies a retry interval to **Mautic’s existing scheduler**, even when its global retry interval is unset. Campaign actions remain pending and retry as capacity becomes available; no core patch, database table, custom queue daemon or migration is introduced. Manual example/diagnostic sends report the limit and must be retried by the operator; standalone diagnostics return HTTP 429 with no provider handoff. Other provider failures retain the existing confirmed-refusal versus uncertain-handoff fallback policy, so ambiguous sends are never routed to another account.
+
+Only traffic using a Multi Mail SMTP/API transport is counted. Direct use of original SMTP/provider DSNs bypasses this ledger; native passthrough/composite transports preserve their original optional interfaces and do not participate in quota rotation. During a controlled activation, operators can seed the first account’s actual last-hour accepted counts using `HourlyQuota::importAccepted()` with timestamp/count data and a unique idempotent reference. This method is not exposed through the web UI. Keep `hourly-usage.json` and its lock private and include the ledger in protected backups; do not reset it during deployments.
+
+Run `php Tests/hourly-quotas.php` for isolated rotation, shared-account, rolling-window, outcome, campaign retry and concurrent PHP-process tests. These tests use synthetic contracts and temporary files, never a Mautic kernel, database, real credentials or network.
+
+![Per-connection hourly acceptance, reservation, uncertainty and rejection history](docs/screenshots/hourly-history.png)
+
+See [validation and rollout notes](docs/hourly-validation.md) for the isolated checks and controlled provider handoff validation.
+
 ## Native Mautic sending
 
 ### Test a connection and send native examples
@@ -34,7 +56,7 @@ Each saved connection has **Test sending**. Choose a saved connection and one re
 
 For administrators, the native email **Send example** modal now requires an explicit sending choice: a saved connection, or the current Mautic transport. Selecting a connection preserves native email rendering and the chosen transport receives Mautic’s From, Reply-To, recipient envelope and attachments. API providers reassemble messages according to their capabilities; see the provider notes below. Only that connection's configured fallback applies; an unavailable or failed selection never silently uses the global transport. The selection applies only to this example and does not change campaign routing. Use a provider that authorizes the email's Mautic sender.
 
-The connections page shows the active global transport and marks a saved connection as active only when its ID exactly matches the configured `multimail://` DSN. Registering a connection alone still does not switch the global transport. No arbitrary connection is automatically promoted.
+The connections page shows the active global transport and marks a saved connection as active only when its ID exactly matches the configured `multimail://` DSN. Registering a connection alone still does not switch the global transport. No arbitrary connection is automatically promoted by registration; global `multimail://auto` is an explicit opt-in.
 
 For Resend API diagnostics the result retains the provider's email ID and HTTP response code. Known error names are allowlisted; raw API bodies, exceptions, credentials and recipients are never included in the result. HTTP 400/404/405/422 is a rejected diagnostic; network failures, malformed successful responses and HTTP 5xx remain uncertain and are never retried through another connection. The campaign fallback policy is unchanged. A successful POST confirms acceptance, not inbox delivery. A sending-only Resend key can send and return an ID but cannot list/retrieve email history (`401 restricted_api_key`); delivery reconciliation requires separately authorized read access or a webhook integration.
 

@@ -2,15 +2,22 @@
 {% block mauticContent %}multimailconnections{% endblock %}
 {% block headerTitle %}Multi Mail · Conexões de e-mail{% endblock %}
 {% block content %}
-<style>#mail-connections [hidden] { display: none !important; } #mail-test-result { white-space: pre-line; overflow-wrap: anywhere; }</style>
+<style>#mail-connections [hidden] { display: none !important; } #mail-test-result { white-space: pre-line; overflow-wrap: anywhere; } #mail-connections .mail-quota { min-width: 170px; font-variant-numeric: tabular-nums; } #mail-connections .mail-quota .progress { height: 6px; margin: 8px 0; } #mail-connections .mail-quota small { display: block; } #mail-connections .mail-usage-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; } #mail-connections .mail-usage-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } #mail-connections .table th { white-space: nowrap; } #mail-connections .table td { vertical-align: middle; } #mail-connections .mail-capacity-fields { border-top: 1px solid var(--border-color, #e5e5e5); padding-top: 16px; }</style>
 <div class="pa-md" id="mail-connections">
     {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
     {% if saved %}<div class="alert alert-success" role="status">Configuração salva.</div>{% endif %}
-    <p class="text-muted">Cadastre contas SMTP e APIs e escolha a conexão de reserva de cada uma. O cadastro não altera os envios atuais do Mautic.</p>
-    <div class="alert {{ transport.connection_id ? 'alert-success' : 'alert-info' }}">
+    <p class="text-muted">{{ 'mautic.multimail.quota.intro'|trans }}</p>
+    <div class="alert {{ transport.connection_id or transport.rotation|default(false) ? 'alert-success' : 'alert-info' }}">
         <i class="ri-route-line" aria-hidden="true"></i>
-        <strong>{{ 'mautic.multimail.transport.current'|trans }}: {{ transport.name ?: transport.scheme }}</strong>
-        <p class="mb-0">{{ 'mautic.multimail.transport.help'|trans }}</p>
+        <strong>{{ 'mautic.multimail.transport.current'|trans }}: {{ transport.rotation|default(false) ? 'mautic.multimail.quota.rotation_active'|trans : (transport.name ?: transport.scheme) }}</strong>
+        <p class="mb-0">{{ (transport.rotation|default(false) ? 'mautic.multimail.quota.rotation_help' : 'mautic.multimail.transport.help')|trans }}</p>
+    </div>
+    <div class="panel panel-default">
+        <div class="panel-body mail-usage-toolbar">
+            <div><strong>{{ 'mautic.multimail.quota.title'|trans }}</strong><p class="text-muted mb-0">{{ 'mautic.multimail.quota.help'|trans }}</p></div>
+            <div class="mail-usage-actions"><span id="mail-usage-status" class="text-muted" role="status" aria-live="polite"></span><button class="btn btn-default btn-sm" type="button" id="mail-usage-refresh" data-url="{{ path('mautic_multimail_connections', {usage: 1}) }}" data-pending="{{ 'mautic.multimail.quota.refreshing'|trans }}" data-done="{{ 'mautic.multimail.quota.updated'|trans }}" data-error="{{ 'mautic.multimail.quota.unavailable'|trans }}"><i class="ri-refresh-line" aria-hidden="true"></i> {{ 'mautic.multimail.quota.refresh'|trans }}</button></div>
+        </div>
+        {% if not transport.rotation|default(false) %}<div class="panel-footer text-muted">{{ 'mautic.multimail.quota.activation'|trans }} <code>multimail://auto</code></div>{% endif %}
     </div>
     {% if editing %}
     <div class="alert alert-info"><div style="min-width:0;overflow-wrap:anywhere">
@@ -23,15 +30,23 @@
         <div class="panel-heading"><div class="panel-title">Suas conexões <span class="label label-default">{{ data.connections|length }}</span></div></div>
         <div class="table-responsive">
             <table class="table table-hover mb-0">
-                <thead><tr><th>Conexão</th><th>Provedor</th><th>Remetente</th><th>Fallback</th><th>Credenciais</th><th><span class="sr-only">Ações</span></th></tr></thead>
+                <thead><tr><th>Conexão</th><th>Provedor</th><th>Remetente</th><th>Fallback</th><th>{{ 'mautic.multimail.quota.column'|trans }}</th><th><span class="sr-only">Ações</span></th></tr></thead>
                 <tbody>
                 {% for connection in data.connections %}
-                    <tr>
-                        <td><strong>{{ connection.name }}</strong>{% if transport.connection_id == connection.id %}<br><span class="label label-success">{{ 'mautic.multimail.transport.active'|trans }}</span>{% else %}<br><small class="text-muted">{{ 'mautic.multimail.transport.registered'|trans }}</small>{% endif %}</td>
+                    <tr data-mail-connection="{{ connection.id }}" data-hourly-history="{{ connection.hourly.history|json_encode|e('html_attr') }}">
+                        <td><strong>{{ connection.name }}</strong><br><small class="text-muted">{{ 'mautic.multimail.quota.priority'|trans }} {{ connection.priority }}</small>{% if transport.connection_id == connection.id %}<br><span class="label label-success">{{ 'mautic.multimail.transport.active'|trans }}</span>{% elseif transport.rotation|default(false) and connection.pool_enabled %}<br><span class="label label-info">{{ 'mautic.multimail.quota.enabled'|trans }}</span>{% else %}<br><small class="text-muted">{{ 'mautic.multimail.transport.registered'|trans }}</small>{% endif %}</td>
                         <td>{{ providers[connection.provider].label }}</td>
                         <td>{{ connection.from_email }}{% if connection.reply_to %}<br><small class="text-muted">Respostas: {{ connection.reply_to }}</small>{% endif %}</td>
                         <td>{% if connection.chain %}{% for step in connection.chain %}{{ step.name }}{% if not loop.last %} → {% endif %}{% endfor %}{% else %}<span class="text-muted">Sem fallback</span>{% endif %}</td>
-                        <td><i class="ri-lock-line" aria-hidden="true"></i> Salvas</td>
+                        <td class="mail-quota" data-mail-quota>
+                            {% set quota = connection.hourly %}
+                            <strong data-quota-count>{{ quota.used }} / {{ quota.limit > 0 ? quota.limit : 'mautic.multimail.quota.unlimited'|trans }}</strong>
+                            <div class="progress" aria-hidden="true"><div class="progress-bar {{ quota.status == 'limited' ? 'progress-bar-warning' : '' }}" data-quota-progress style="width:{{ quota.limit > 0 ? min(100, (quota.used / quota.limit * 100)) : 0 }}%"></div></div>
+                            <span class="label {{ quota.status == 'limited' ? 'label-warning' : (quota.status == 'ready' ? 'label-success' : 'label-default') }}" data-quota-status data-label-ready="{{ 'mautic.multimail.quota.ready'|trans }}" data-label-limited="{{ 'mautic.multimail.quota.limited'|trans }}" data-label-disabled="{{ 'mautic.multimail.quota.disabled'|trans }}" data-label-native="{{ 'mautic.multimail.quota.native'|trans }}">{{ ('mautic.multimail.quota.' ~ quota.status)|trans }}</span>
+                            {% if connection.quota_group %}<small class="text-muted">{{ 'mautic.multimail.quota.shared'|trans }}: {{ connection.quota_group }}</small>{% endif %}
+                            <small class="text-muted" data-quota-accepted data-label="{{ 'mautic.multimail.quota.accepted'|trans }}">{{ 'mautic.multimail.quota.accepted'|trans }}: {{ quota.accepted }}</small>
+                            <small class="text-muted" data-quota-retry data-label="{{ 'mautic.multimail.quota.retry'|trans }}" {{ not quota.retry_at ? 'hidden' : '' }}>{% if quota.retry_at %}{{ 'mautic.multimail.quota.retry'|trans }}: <time datetime="{{ quota.retry_at }}">{{ quota.retry_at }}</time>{% endif %}</small>
+                        </td>
                         <td><div class="btn-group"><a class="btn btn-default btn-sm" href="{{ path('mautic_multimail_connections', {test: connection.id}) }}#mail-test"><i class="ri-send-plane-line" aria-hidden="true"></i> {{ 'mautic.multimail.test.action'|trans }}<span class="sr-only"> {{ connection.name }}</span></a><a class="btn btn-default btn-sm" href="{{ path('mautic_multimail_connections', {edit: connection.id}) }}">Editar<span class="sr-only"> {{ connection.name }}</span></a></div></td>
                     </tr>
                 {% else %}<tr><td colspan="6" class="text-muted pa-md">Adicione sua primeira conexão abaixo.</td></tr>{% endfor %}
@@ -39,6 +54,11 @@
             </table>
         </div>
     </div>
+    <details class="panel panel-default" id="mail-hourly-history" data-unlimited="{{ 'mautic.multimail.quota.unlimited'|trans }}">
+        <summary class="panel-heading">{{ 'mautic.multimail.quota.history'|trans }}</summary>
+        <div class="panel-body"><label for="mail-history-connection">{{ 'mautic.multimail.example.connection'|trans }}</label><select class="form-control" id="mail-history-connection">{% for connection in data.connections %}<option value="{{ connection.id }}" {{ editing and editing.id == connection.id ? 'selected' : '' }}>{{ connection.name }}</option>{% endfor %}</select><p class="help-block">{{ 'mautic.multimail.quota.history_help'|trans }}</p></div>
+        <div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>{{ 'mautic.multimail.quota.hour'|trans }}</th><th>{{ 'mautic.multimail.quota.accepted'|trans }}</th><th>{{ 'mautic.multimail.quota.reserved'|trans }}</th><th>{{ 'mautic.multimail.quota.uncertain'|trans }}</th><th>{{ 'mautic.multimail.quota.rejected'|trans }}</th></tr></thead><tbody id="mail-history-body"></tbody></table></div>
+    </details>
     <div class="panel panel-default" id="mail-test">
         <div class="panel-heading"><div class="panel-title"><i class="ri-mail-check-line" aria-hidden="true"></i> {{ 'mautic.multimail.test.title'|trans }}</div></div>
         <div class="panel-body">
@@ -85,6 +105,15 @@
                     <div class="col-md-6 form-group"><label for="mail-reply">Responder para <small class="text-muted">opcional</small></label><input type="email" class="form-control" id="mail-reply" name="reply_to" maxlength="254" value="{{ editing.reply_to|default('') }}"></div>
                     <div class="col-md-6 form-group"><label for="mail-fallback">Conexão de fallback</label><select class="form-control" id="mail-fallback" name="fallback" {{ provider == 'native' ? 'disabled' : '' }}><option value="">Sem fallback</option>{% for connection in data.connections %}{% if connection.provider != 'native' and (not editing or connection.id != editing.id) %}<option value="{{ connection.id }}" {{ editing and connection.id == editing.fallback ? 'selected' : '' }}>{{ connection.name }} · {{ providers[connection.provider].label }}</option>{% endif %}{% endfor %}</select><p class="help-block">A cadeia de reservas aparece na lista. Não é permitido voltar a uma conexão já presente na cadeia.</p><p class="help-block" id="mail-native-fallback-help" {{ provider != 'native' ? 'hidden' : '' }}>Para transporte nativo, configure as reservas com failover(...) no próprio DSN. Isso preserva o adaptador original e suas funções.</p></div>
                 </div>
+                <div class="mail-capacity-fields" id="mail-capacity-fields" {{ provider == 'native' ? 'hidden' : '' }}>
+                    <h4>{{ 'mautic.multimail.quota.settings'|trans }}</h4>
+                    <div class="row">
+                        <div class="col-md-4 form-group"><label for="mail-hourly-limit">{{ 'mautic.multimail.quota.limit'|trans }}</label><input type="number" class="form-control" id="mail-hourly-limit" name="hourly_limit" min="0" max="1000000" step="1" value="{{ editing.hourly_limit|default(0) }}" required {{ provider == 'native' ? 'disabled' : '' }}><p class="help-block">{{ 'mautic.multimail.quota.limit_help'|trans }}</p></div>
+                        <div class="col-md-4 form-group"><label for="mail-priority">{{ 'mautic.multimail.quota.priority'|trans }}</label><input type="number" class="form-control" id="mail-priority" name="priority" min="0" max="9999" step="1" value="{{ editing.priority|default(100) }}" required {{ provider == 'native' ? 'disabled' : '' }}><p class="help-block">{{ 'mautic.multimail.quota.priority_help'|trans }}</p></div>
+                        <div class="col-md-4 form-group"><label for="mail-quota-group">{{ 'mautic.multimail.quota.group'|trans }}</label><input class="form-control" id="mail-quota-group" name="quota_group" pattern="[a-z0-9_-]{0,64}" maxlength="64" value="{{ editing.quota_group|default('') }}" placeholder="resend-principal" {{ provider == 'native' ? 'disabled' : '' }}><p class="help-block">{{ 'mautic.multimail.quota.group_help'|trans }}</p></div>
+                    </div>
+                    <input type="hidden" name="pool_enabled" value="0"><label><input type="checkbox" name="pool_enabled" value="1" {{ not editing or editing.pool_enabled ? 'checked' : '' }} {{ provider == 'native' ? 'disabled' : '' }}> {{ 'mautic.multimail.quota.enabled'|trans }}</label>
+                </div>
                 {% for key, item in providers %}
                 <fieldset data-mail-provider="{{ key }}" {{ key != provider ? 'hidden' : '' }}>
                     <legend class="h5">{{ item.label }} · dados de acesso</legend>
@@ -119,5 +148,5 @@
         </div>
     </div>
 </div>
-{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=6', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
+{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=8', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
 {% endblock %}

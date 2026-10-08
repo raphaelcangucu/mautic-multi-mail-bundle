@@ -11,6 +11,7 @@ final class TransportStatus
     {
         $result = ['connection_id' => null, 'name' => null, 'scheme' => 'unknown'];
         if (!is_string($dsn)) { return $result; }
+        if ($dsn === 'multimail://auto') { return array_replace($result, ['scheme' => 'multimail', 'rotation' => true]); }
         if (preg_match('/^multimail:\/\/([a-f0-9]{32})$/D', $dsn, $match)) {
             $result['scheme'] = 'multimail';
             foreach ($connections as $connection) {

@@ -1,6 +1,79 @@
 (function () {
     'use strict';
+    function initUsage() {
+        const refresh = document.getElementById('mail-usage-refresh');
+        if (!refresh || refresh.dataset.initialized) return;
+        refresh.dataset.initialized = '1';
+        const status = document.getElementById('mail-usage-status');
+        const historySelect = document.getElementById('mail-history-connection');
+        const historyBody = document.getElementById('mail-history-body');
+        const rows = new Map();
+        document.querySelectorAll('[data-mail-connection]').forEach(function (row) { rows.set(row.dataset.mailConnection, row); });
+        const unlimited = document.getElementById('mail-hourly-history').dataset.unlimited;
+        function time(value) {
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+        }
+        function renderHistory() {
+            historyBody.replaceChildren();
+            const row = rows.get(historySelect.value);
+            if (!row) return;
+            let history;
+            try { history = JSON.parse(row.dataset.hourlyHistory); } catch (_) { return; }
+            if (!Array.isArray(history)) return;
+            history.slice(0, 24).forEach(function (hour) {
+                const tr = document.createElement('tr');
+                [time(hour.utc), hour.accepted, hour.reserved, hour.uncertain, hour.rejected].forEach(function (value) {
+                    const td = document.createElement('td'); td.textContent = String(value); tr.appendChild(td);
+                });
+                historyBody.appendChild(tr);
+            });
+        }
+        const query = window.mQuery || window.jQuery;
+        if (query) query(historySelect).on('change.multimailhistory', renderHistory);
+        else historySelect.addEventListener('change', renderHistory);
+        rows.forEach(function (row) {
+            row.querySelectorAll('time[datetime]').forEach(function (element) { element.textContent = time(element.dateTime); });
+        });
+        renderHistory();
+        refresh.addEventListener('click', async function () {
+            if (refresh.disabled) return;
+            refresh.disabled = true;
+            status.textContent = refresh.dataset.pending;
+            const controller = new AbortController();
+            const timeout = window.setTimeout(function () { controller.abort(); }, 15000);
+            try {
+                const response = await fetch(refresh.dataset.url, {credentials:'same-origin', redirect:'error',
+                    headers:{'Accept':'application/json'}, signal:controller.signal});
+                const payload = await response.json();
+                if (!response.ok || !Array.isArray(payload.connections)) throw new Error('Invalid counter response');
+                payload.connections.forEach(function (connection) {
+                    const row = rows.get(connection.id); const quota = connection.hourly;
+                    if (!row || !quota || !['ready', 'limited', 'disabled', 'native'].includes(quota.status)
+                        || !Number.isInteger(quota.used) || !Number.isInteger(quota.limit)) return;
+                    row.querySelector('[data-quota-count]').textContent = quota.used + ' / ' + (quota.limit > 0 ? quota.limit : unlimited);
+                    const progress = row.querySelector('[data-quota-progress]');
+                    progress.style.width = (quota.limit > 0 ? Math.min(100, quota.used / quota.limit * 100) : 0) + '%';
+                    progress.className = 'progress-bar' + (quota.status === 'limited' ? ' progress-bar-warning' : '');
+                    const badge = row.querySelector('[data-quota-status]');
+                    const key = 'label' + quota.status[0].toUpperCase() + quota.status.slice(1);
+                    badge.textContent = badge.dataset[key];
+                    badge.className = 'label ' + (quota.status === 'limited' ? 'label-warning' : (quota.status === 'ready' ? 'label-success' : 'label-default'));
+                    const accepted = row.querySelector('[data-quota-accepted]');
+                    accepted.textContent = accepted.dataset.label + ': ' + quota.accepted;
+                    const retry = row.querySelector('[data-quota-retry]');
+                    retry.hidden = !quota.retry_at;
+                    retry.textContent = quota.retry_at ? retry.dataset.label + ': ' + time(quota.retry_at) : '';
+                    row.dataset.hourlyHistory = JSON.stringify(quota.history);
+                });
+                renderHistory();
+                status.textContent = refresh.dataset.done + ' · ' + time(payload.checked_at);
+            } catch (_) { status.textContent = refresh.dataset.error; }
+            finally { window.clearTimeout(timeout); refresh.disabled = false; }
+        });
+    }
     function init() {
+        initUsage();
         const form = document.getElementById('mail-connection-form');
         if (!form || form.dataset.initialized) return;
         form.dataset.initialized = '1';
@@ -8,6 +81,14 @@
         if (select) {
             const syncProvider = function () {
                 const native = select.value === 'native';
+                const capacity = form.querySelector('#mail-capacity-fields');
+                if (capacity) {
+                    capacity.hidden = native;
+                    capacity.querySelectorAll('input').forEach(function (field) { field.disabled = native; });
+                    // Preserve an explicit false value when native controls are disabled.
+                    const hidden = capacity.querySelector('input[type="hidden"]');
+                    if (hidden) hidden.disabled = false;
+                }
                 const fallback = form.querySelector('#mail-fallback');
                 if (fallback) {
                     fallback.disabled = native;

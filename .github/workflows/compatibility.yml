@@ -42,4 +42,6 @@ jobs:
       - run: php Tests/provider-transports.php
       - run: php Tests/native-compatibility.php
       - run: php Tests/example-sending.php
+      - run: php Tests/hourly-quotas.php
+      - run: php Tests/quota-template.php
       - run: python3 build/package.py

@@ -29,8 +29,13 @@ final class ConnectionTester
                 ."\nReference: ".$reference."\nSent at: ".gmdate(DATE_ATOM)."\n\nThis is a diagnostic email, not a campaign.");
         if ($connection['reply_to'] !== '') { $email->replyTo($connection['reply_to']); }
         $attempt = null;
+        $reservation = null;
         $invoked = false;
         try {
+            if ($connection['provider'] !== 'native') {
+                $reservation = $this->store->reserve($id, 1);
+                if (!$reservation['allowed']) { return ['status' => 'quota', 'reference' => $reference, 'retry_at' => $reservation['retry_at']]; }
+            }
             if ($connection['provider'] === 'native') {
                 if ($this->native === null) { throw new \RuntimeException('Native factory unavailable.'); }
                 $transport = $this->native->resolve($connection['secrets']['dsn']);
@@ -40,18 +45,24 @@ final class ConnectionTester
             }
             $invoked = true;
             $sent = $transport->send($email);
-            if ($sent === null) { return ['status' => 'rejected', 'reference' => $reference]; }
+            if ($sent === null) {
+                // No positive handoff response is ambiguous, not proof that capacity can be released.
+                $this->finish($reservation, 'uncertain'); $reservation = null;
+                return ['status' => 'uncertain', 'reference' => $reference];
+            }
             $result = ['status' => 'accepted', 'reference' => $reference];
             if ($connection['provider'] === 'resend') {
                 // The bridge replaces the MIME ID with Resend's API ID. Do not discard it.
                 $messageId = $sent->getMessageId();
                 if (!preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/Di', $messageId)) {
+                    $this->finish($reservation, 'uncertain'); $reservation = null;
                     return ['status' => 'uncertain', 'reference' => $reference, 'http_status' => $attempt?->httpStatus(), 'error_code' => 'invalid_response'];
                 }
                 $result['provider_message_id'] = $messageId;
             }
             if ($attempt?->httpStatus() !== null) { $result['http_status'] = $attempt->httpStatus(); }
             if ($attempt?->providerMessageId() !== null) { $result['provider_message_id'] = $attempt->providerMessageId(); }
+            $this->finish($reservation, 'accepted'); $reservation = null;
             // Acceptance means provider handoff, not confirmed delivery to the recipient's inbox.
             return $result;
         } catch (\Throwable $exception) {
@@ -60,6 +71,7 @@ final class ConnectionTester
             $rejected = !$invoked || ($attempt !== null && $attempt->confirmedNotAccepted());
             if ($exception instanceof ProviderResponseException) { $rejected = $exception->rejected; }
             if ($connection['provider'] === 'resend' && in_array($httpStatus, [400, 404, 405, 422], true)) { $rejected = true; }
+            $this->finish($reservation, $rejected ? 'rejected' : 'uncertain'); $reservation = null;
             $result = ['status' => $rejected ? 'rejected' : 'uncertain', 'reference' => $reference];
             if ($httpStatus !== null) { $result['http_status'] = $httpStatus; }
             if ($connection['provider'] === 'resend' && $httpStatus !== null) {
@@ -78,5 +90,12 @@ final class ConnectionTester
             }
             return $result;
         } finally { $attempt?->close(); }
+    }
+
+    private function finish(?array $reservation, string $outcome): void
+    {
+        if (isset($reservation['token'])) {
+            try { $this->store->finishReservation($reservation['token'], $outcome); } catch (\Throwable) { /* Capacity was already reserved. */ }
+        }
     }
 }
