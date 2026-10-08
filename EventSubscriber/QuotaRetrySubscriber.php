@@ -24,8 +24,9 @@ final class QuotaRetrySubscriber implements EventSubscriberInterface
         $log = $event->getLog();
         $failed = $log->getFailedLog();
         if (!$failed || !preg_match('/'.preg_quote(QuotaExceededException::MARKER, '/').'([0-9]{10})/', (string) $failed->getReason(), $match)) { return; }
-        $retryAt = max(time() + 60, min(time() + 7200, (int) $match[1]));
-        $log->setRescheduleInterval(new \DateInterval('PT'.($retryAt - time()).'S'));
+        $now = time();
+        $retryAt = max($now + 60, min($now + 35 * 86400, (int) $match[1]));
+        $log->setRescheduleInterval(new \DateInterval('PT'.($retryAt - $now).'S'));
         $reason = $this->translator->trans('mautic.multimail.quota.deferred', ['%time%' => gmdate(DATE_ATOM, $retryAt)]);
         $failed->setReason($reason);
         $metadata = $log->getMetadata(); $metadata['reason'] = $reason;

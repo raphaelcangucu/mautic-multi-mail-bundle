@@ -154,6 +154,9 @@ namespace {
         $subscriber = new QuotaRetrySubscriber(new Translator('en_US'));
         $subscriber->onFailed(new \Mautic\CampaignBundle\Event\FailedEvent($log));
         assertQuota($log->interval?->s >= 119 && $log->metadata['preserved'] && !str_contains($failed->reason, QuotaExceededException::MARKER), 'Quota campaign failure receives a retry interval without kernel/database or leaking its internal marker');
+        $failed->reason = QuotaExceededException::MARKER.(time()+30*86400);
+        $subscriber->onFailed(new \Mautic\CampaignBundle\Event\FailedEvent($log));
+        assertQuota($log->interval?->s >= 30*86400-1, 'Monthly deferral retains full reset interval without repeated hourly retries');
         $log->interval = null; $failed->reason='Ordinary transport failure';
         $subscriber->onFailed(new \Mautic\CampaignBundle\Event\FailedEvent($log));
         assertQuota($log->interval === null, 'Other campaign failures retain native policy');

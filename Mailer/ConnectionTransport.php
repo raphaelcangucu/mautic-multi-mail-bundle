@@ -61,13 +61,21 @@ final class ConnectionTransport extends AbstractTransport
                 $message->setMessageId($sent->getMessageId());
 
                 return;
-            } catch (\Throwable) {
+            } catch (\Throwable $exception) {
                 if ($attempt !== null && !$attempt->confirmedNotAccepted()) {
                     if ($reservation !== null && isset($reservation['token'])) { $this->finish($reservation['token'], 'uncertain'); }
                     // A timeout after handoff may already have queued the message: avoid duplicate delivery.
                     throw new TransportException('Multi Mail: resultado do envio incerto; fallback não executado.');
                 }
                 if ($reservation !== null && isset($reservation['token'])) { $this->finish($reservation['token'], 'rejected'); }
+                $period = ProviderQuota::period($connection['provider'], $attempt?->httpStatus(), $exception);
+                if ($period !== null) {
+                    try { $this->store->blockProviderQuota($connection['id'], $period); }
+                    catch (\Throwable) { throw new TransportException('Multi Mail: controle de cota indisponível.'); }
+                    $quotaBlocked = true;
+                    $candidate = \MauticPlugin\MauticMultiMailBundle\Application\HourlyQuota::resetAt($period, time());
+                    $retryAt = $retryAt === null ? $candidate : min($retryAt, $candidate);
+                }
                 // No provider accepted the message. Try the configured next connection.
             } finally { $attempt?->close(); }
         }

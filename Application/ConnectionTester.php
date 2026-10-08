@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\MauticMultiMailBundle\Application;
 
-use MauticPlugin\MauticMultiMailBundle\Mailer\{ConnectionBuilder, NativeTransportResolver, ProviderResponseException};
+use MauticPlugin\MauticMultiMailBundle\Mailer\{ConnectionBuilder, NativeTransportResolver, ProviderResponseException, ProviderQuota};
 use Symfony\Component\Mailer\Exception\HttpTransportException;
 use Symfony\Component\Mime\{Address, Email};
 
@@ -73,6 +73,12 @@ final class ConnectionTester
             if ($connection['provider'] === 'resend' && in_array($httpStatus, [400, 404, 405, 422], true)) { $rejected = true; }
             $this->finish($reservation, $rejected ? 'rejected' : 'uncertain'); $reservation = null;
             $result = ['status' => $rejected ? 'rejected' : 'uncertain', 'reference' => $reference];
+            $period = $rejected ? ProviderQuota::period($connection['provider'], $httpStatus, $exception) : null;
+            if ($period !== null) {
+                $this->store->blockProviderQuota($id, $period);
+                $result['status'] = 'quota';
+                $result['retry_at'] = gmdate(DATE_ATOM, HourlyQuota::resetAt($period, time()));
+            }
             if ($httpStatus !== null) { $result['http_status'] = $httpStatus; }
             if ($connection['provider'] === 'resend' && $httpStatus !== null) {
                 $result['error_code'] = $httpStatus === 200 ? 'invalid_response' : 'provider_error';

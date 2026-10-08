@@ -26,11 +26,13 @@ try {
     $store = new ConnectionStore($root.'/project');
     $data = $store->save(['provider' => 'resend', 'name' => '<script>unsafe</script>', 'from_email' => 'sender@example.com', 'from_name' => 'Sender',
         'reply_to' => '', 'fallback' => '', 'settings' => [], 'secrets' => ['api_key' => 're_private-unit-secret-abcdefghijklmnop'],
-        'hourly_limit' => 1000, 'priority' => 0, 'quota_group' => 'resend-account'], 0, 1);
+        'hourly_limit' => 1000, 'daily_limit' => 100, 'monthly_limit' => 3000, 'priority' => 0, 'quota_group' => 'resend-account'], 0, 1);
     $html=$twig->render('Connections/index.html.twig', array_replace($base, ['data'=>$data,'editing'=>$data['connections'][0],'provider'=>'resend',
         'transport'=>['connection_id'=>null,'name'=>null,'scheme'=>'multimail','rotation'=>true]]));
     if (str_contains($html, '<script>unsafe</script>') || str_contains($html,'private-unit-secret') || !str_contains($html,'value="1000"')
-        || !preg_match('/id="mail-priority"[^>]*value="0"/', $html)) { throw new RuntimeException('Quota template escaping/value regression'); }
+        || !preg_match('/id="mail-priority"[^>]*value="0"/', $html)
+        || !preg_match('/id="mail-daily-limit"[^>]*value="100"/', $html) || !preg_match('/id="mail-monthly-limit"[^>]*value="3000"/', $html)
+        || substr_count($html, 'data-quota-period=') !== 3) { throw new RuntimeException('Quota template escaping/value regression'); }
     echo "PASS: empty/populated/rotation Twig templates render with strict variables, quota values, zero priority and escaped names; no kernel/database/network\n";
 } finally {
     foreach (glob($root.'/project-multimail-private/*') as $file) { unlink($file); }

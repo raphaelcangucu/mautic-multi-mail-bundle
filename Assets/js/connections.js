@@ -51,10 +51,18 @@
                     const row = rows.get(connection.id); const quota = connection.hourly;
                     if (!row || !quota || !['ready', 'limited', 'disabled', 'native'].includes(quota.status)
                         || !Number.isInteger(quota.used) || !Number.isInteger(quota.limit)) return;
-                    row.querySelector('[data-quota-count]').textContent = quota.used + ' / ' + (quota.limit > 0 ? quota.limit : unlimited);
-                    const progress = row.querySelector('[data-quota-progress]');
-                    progress.style.width = (quota.limit > 0 ? Math.min(100, quota.used / quota.limit * 100) : 0) + '%';
-                    progress.className = 'progress-bar' + (quota.status === 'limited' ? ' progress-bar-warning' : '');
+                    if (!quota.periods || !['hourly', 'daily', 'monthly'].every(function (period) {
+                        const item = quota.periods[period];
+                        return item && Number.isInteger(item.used) && item.used >= 0 && Number.isInteger(item.limit) && item.limit >= 0
+                            && ['ready', 'limited'].includes(item.status);
+                    })) throw new Error('Invalid period counters');
+                    row.querySelectorAll('[data-quota-period]').forEach(function (element) {
+                        const item = quota.periods[element.dataset.quotaPeriod];
+                        element.querySelector('[data-quota-count]').textContent = item.used + ' / ' + (item.limit > 0 ? item.limit : unlimited);
+                        const progress = element.querySelector('[data-quota-progress]');
+                        progress.style.width = (item.limit > 0 ? Math.min(100, item.used / item.limit * 100) : 0) + '%';
+                        progress.className = 'progress-bar' + (item.status === 'limited' ? ' progress-bar-warning' : '');
+                    });
                     const badge = row.querySelector('[data-quota-status]');
                     const key = 'label' + quota.status[0].toUpperCase() + quota.status.slice(1);
                     badge.textContent = badge.dataset[key];

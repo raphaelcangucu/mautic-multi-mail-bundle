@@ -2,7 +2,7 @@
 {% block mauticContent %}multimailconnections{% endblock %}
 {% block headerTitle %}Multi Mail · Conexões de e-mail{% endblock %}
 {% block content %}
-<style>#mail-connections [hidden] { display: none !important; } #mail-test-result { white-space: pre-line; overflow-wrap: anywhere; } #mail-connections .mail-quota { min-width: 170px; font-variant-numeric: tabular-nums; } #mail-connections .mail-quota .progress { height: 6px; margin: 8px 0; } #mail-connections .mail-quota small { display: block; } #mail-connections .mail-usage-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; } #mail-connections .mail-usage-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } #mail-connections .table th { white-space: nowrap; } #mail-connections .table td { vertical-align: middle; } #mail-connections .mail-capacity-fields { border-top: 1px solid var(--border-color, #e5e5e5); padding-top: 16px; }</style>
+<style>#mail-connections [hidden] { display: none !important; } #mail-test-result { white-space: pre-line; overflow-wrap: anywhere; } #mail-connections .mail-quota { min-width: 170px; font-variant-numeric: tabular-nums; } #mail-connections .mail-quota .progress { height: 4px; margin: 4px 0 8px; } #mail-connections .mail-quota-line { display:flex; justify-content:space-between; gap:16px; } #mail-connections .mail-quota-line strong { white-space:nowrap; } #mail-connections .mail-quota small { display: block; } #mail-connections .mail-usage-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; } #mail-connections .mail-usage-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } #mail-connections .table th { white-space: nowrap; } #mail-connections .table td { vertical-align: middle; } #mail-connections .mail-capacity-fields { border-top: 1px solid var(--border-color, #e5e5e5); padding-top: 16px; }</style>
 <div class="pa-md" id="mail-connections">
     {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
     {% if saved %}<div class="alert alert-success" role="status">Configuração salva.</div>{% endif %}
@@ -40,11 +40,15 @@
                         <td>{% if connection.chain %}{% for step in connection.chain %}{{ step.name }}{% if not loop.last %} → {% endif %}{% endfor %}{% else %}<span class="text-muted">Sem fallback</span>{% endif %}</td>
                         <td class="mail-quota" data-mail-quota>
                             {% set quota = connection.hourly %}
-                            <strong data-quota-count>{{ quota.used }} / {{ quota.limit > 0 ? quota.limit : 'mautic.multimail.quota.unlimited'|trans }}</strong>
-                            <div class="progress" aria-hidden="true"><div class="progress-bar {{ quota.status == 'limited' ? 'progress-bar-warning' : '' }}" data-quota-progress style="width:{{ quota.limit > 0 ? min(100, (quota.used / quota.limit * 100)) : 0 }}%"></div></div>
+                            {% for period, capacity in quota.periods %}
+                            <div data-quota-period="{{ period }}" title="{{ period != 'hourly' ? 'mautic.multimail.quota.calendar_help'|trans : 'mautic.multimail.quota.hourly_help'|trans }}">
+                                <div class="mail-quota-line"><span class="text-muted">{{ ('mautic.multimail.quota.' ~ period)|trans }}</span><strong data-quota-count>{{ capacity.used }} / {{ capacity.limit > 0 ? capacity.limit : 'mautic.multimail.quota.unlimited'|trans }}</strong></div>
+                                <div class="progress" aria-hidden="true"><div class="progress-bar {{ capacity.status == 'limited' ? 'progress-bar-warning' : '' }}" data-quota-progress style="width:{{ capacity.limit > 0 ? min(100, (capacity.used / capacity.limit * 100)) : 0 }}%"></div></div>
+                            </div>
+                            {% endfor %}
                             <span class="label {{ quota.status == 'limited' ? 'label-warning' : (quota.status == 'ready' ? 'label-success' : 'label-default') }}" data-quota-status data-label-ready="{{ 'mautic.multimail.quota.ready'|trans }}" data-label-limited="{{ 'mautic.multimail.quota.limited'|trans }}" data-label-disabled="{{ 'mautic.multimail.quota.disabled'|trans }}" data-label-native="{{ 'mautic.multimail.quota.native'|trans }}">{{ ('mautic.multimail.quota.' ~ quota.status)|trans }}</span>
                             {% if connection.quota_group %}<small class="text-muted">{{ 'mautic.multimail.quota.shared'|trans }}: {{ connection.quota_group }}</small>{% endif %}
-                            <small class="text-muted" data-quota-accepted data-label="{{ 'mautic.multimail.quota.accepted'|trans }}">{{ 'mautic.multimail.quota.accepted'|trans }}: {{ quota.accepted }}</small>
+                            <small class="text-muted" data-quota-accepted data-label="{{ 'mautic.multimail.quota.accepted_recent'|trans }}">{{ 'mautic.multimail.quota.accepted_recent'|trans }}: {{ quota.accepted }}</small>
                             <small class="text-muted" data-quota-retry data-label="{{ 'mautic.multimail.quota.retry'|trans }}" {{ not quota.retry_at ? 'hidden' : '' }}>{% if quota.retry_at %}{{ 'mautic.multimail.quota.retry'|trans }}: <time datetime="{{ quota.retry_at }}">{{ quota.retry_at }}</time>{% endif %}</small>
                         </td>
                         <td><div class="btn-group"><a class="btn btn-default btn-sm" href="{{ path('mautic_multimail_connections', {test: connection.id}) }}#mail-test"><i class="ri-send-plane-line" aria-hidden="true"></i> {{ 'mautic.multimail.test.action'|trans }}<span class="sr-only"> {{ connection.name }}</span></a><a class="btn btn-default btn-sm" href="{{ path('mautic_multimail_connections', {edit: connection.id}) }}">Editar<span class="sr-only"> {{ connection.name }}</span></a></div></td>
@@ -109,6 +113,12 @@
                     <h4>{{ 'mautic.multimail.quota.settings'|trans }}</h4>
                     <div class="row">
                         <div class="col-md-4 form-group"><label for="mail-hourly-limit">{{ 'mautic.multimail.quota.limit'|trans }}</label><input type="number" class="form-control" id="mail-hourly-limit" name="hourly_limit" min="0" max="1000000" step="1" value="{{ editing.hourly_limit|default(0) }}" required {{ provider == 'native' ? 'disabled' : '' }}><p class="help-block">{{ 'mautic.multimail.quota.limit_help'|trans }}</p></div>
+                        {% for period in ['daily', 'monthly'] %}
+                        <div class="col-md-4 form-group"><label for="mail-{{ period }}-limit">{{ ('mautic.multimail.quota.' ~ period ~ '_limit')|trans }}</label><input type="number" class="form-control" id="mail-{{ period }}-limit" name="{{ period }}_limit" min="0" max="1000000" step="1" value="{{ editing[period ~ '_limit']|default(0) }}" required {{ provider == 'native' ? 'disabled' : '' }}><p class="help-block">{{ 'mautic.multimail.quota.limit_help'|trans }}</p></div>
+                        {% endfor %}
+                    </div>
+                    <p class="help-block">{{ 'mautic.multimail.quota.calendar_help'|trans }}</p>
+                    <div class="row">
                         <div class="col-md-4 form-group"><label for="mail-priority">{{ 'mautic.multimail.quota.priority'|trans }}</label><input type="number" class="form-control" id="mail-priority" name="priority" min="0" max="9999" step="1" value="{{ editing.priority|default(100) }}" required {{ provider == 'native' ? 'disabled' : '' }}><p class="help-block">{{ 'mautic.multimail.quota.priority_help'|trans }}</p></div>
                         <div class="col-md-4 form-group"><label for="mail-quota-group">{{ 'mautic.multimail.quota.group'|trans }}</label><input class="form-control" id="mail-quota-group" name="quota_group" pattern="[a-z0-9_-]{0,64}" maxlength="64" value="{{ editing.quota_group|default('') }}" placeholder="resend-principal" {{ provider == 'native' ? 'disabled' : '' }}><p class="help-block">{{ 'mautic.multimail.quota.group_help'|trans }}</p></div>
                     </div>

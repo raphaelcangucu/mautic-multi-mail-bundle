@@ -8,6 +8,12 @@ php Tests/connections.php
 php Tests/transports.php
 php Tests/native-compatibility.php
 php Tests/example-sending.php
+php Tests/provider-transports.php
+php Tests/hourly-quotas.php
+php Tests/period-quotas.php
+php Tests/quota-template.php
+node Tests/connections-ui.cjs
+node Tests/quota-ui.cjs
 node --check Assets/js/connections.js
 python3 build/package.py
 ```

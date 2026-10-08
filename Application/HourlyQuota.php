@@ -14,18 +14,28 @@ final class HourlyQuota
         return ($connection['quota_group'] ?? '') !== '' ? 'group:'.$connection['quota_group'] : 'connection:'.$connection['id'];
     }
 
-    public function reserve(array $connection, int $recipients, int $limit): array
+    public function reserve(array $connection, int $recipients, int $limit, int $dailyLimit = 0, int $monthlyLimit = 0): array
     {
         if ($recipients < 1 || $recipients > 1000000) { throw new \InvalidArgumentException('Invalid recipient count.'); }
-        return $this->transaction(function (array &$data, int $now) use ($connection, $recipients, $limit): array {
+        return $this->transaction(function (array &$data, int $now) use ($connection, $recipients, $limit, $dailyLimit, $monthlyLimit): array {
             $scope = self::scope($connection);
             $usage = $this->scopeUsage($data, $scope, $now);
+            $blocked = []; $retry = [];
             if ($limit > 0 && $usage + $recipients > $limit) {
-                return ['allowed' => false, 'retry_at' => $this->retryAt($data['quotas'][$scope] ?? [], $now, $usage + $recipients - $limit)];
+                $blocked[] = 'hourly';
+                $retry[] = strtotime($this->retryAt($data['quotas'][$scope] ?? [], $now, $usage + $recipients - $limit) ?? gmdate(DATE_ATOM, $now + 3600));
             }
+            foreach (['daily' => $dailyLimit, 'monthly' => $monthlyLimit] as $period => $cap) {
+                if (($cap > 0 && $this->periodUsage($data, $scope, $period, $now) + $recipients > $cap)
+                    || ($data['blocks'][$scope][$period] ?? 0) > $now) {
+                    $blocked[] = $period; $retry[] = self::resetAt($period, $now);
+                }
+            }
+            if ($blocked) { return ['allowed' => false, 'retry_at' => gmdate(DATE_ATOM, max($retry)), 'blocked_by' => $blocked]; }
             $minute = (int) floor($now / 60);
             $token = bin2hex(random_bytes(16));
             $data['quotas'][$scope][$minute] = ($data['quotas'][$scope][$minute] ?? 0) + $recipients;
+            foreach (['daily', 'monthly'] as $period) { $this->incrementPeriod($data, $scope, $period, $now, $recipients); }
             $this->increment($data, $connection['id'], $minute, 'reserved', $recipients);
             $data['reservations'][$token] = ['connection_id' => $connection['id'], 'scope' => $scope, 'minute' => $minute, 'recipients' => $recipients];
             return ['allowed' => true, 'token' => $token];
@@ -54,6 +64,12 @@ final class HourlyQuota
                 $scope = $reservation['scope'];
                 $data['quotas'][$scope][$minute] -= $count;
                 $data['quotas'][$scope][$finishedMinute] = ($data['quotas'][$scope][$finishedMinute] ?? 0) + $count;
+            }
+            foreach (['daily', 'monthly'] as $period) {
+                if ($outcome === 'rejected' || self::periodKey($period, $minute * 60) !== self::periodKey($period, $finishedMinute * 60)) {
+                    $this->incrementPeriod($data, $reservation['scope'], $period, $minute * 60, -$count);
+                    if ($outcome !== 'rejected') { $this->incrementPeriod($data, $reservation['scope'], $period, $finishedMinute * 60, $count); }
+                }
             }
             unset($data['reservations'][$token]);
             return [];
@@ -87,22 +103,37 @@ final class HourlyQuota
                 }
                 $native = $connection['provider'] === 'native';
                 $enabled = $connection['pool_enabled'] ?? !$native;
-                $status = $native ? 'native' : (!$enabled ? 'disabled' : ($limit > 0 && $usage >= $limit ? 'limited' : 'ready'));
+                $periods = ['hourly' => ['used' => $usage, 'limit' => $limit, 'remaining' => $limit > 0 ? max(0, $limit - $usage) : null,
+                    'status' => $limit > 0 && $usage >= $limit ? 'limited' : 'ready',
+                    'retry_at' => $limit > 0 && $usage >= $limit ? $this->retryAt($data['quotas'][$scope] ?? [], $now, $usage - $limit + 1) : null]];
+                foreach (['daily', 'monthly'] as $period) {
+                    $used = $this->periodUsage($data, $scope, $period, $now);
+                    $cap = self::effectiveLimit($connection, $connections, $period.'_limit');
+                    $providerBlocked = ($data['blocks'][$scope][$period] ?? 0) > $now;
+                    $limited = $providerBlocked || ($cap > 0 && $used >= $cap);
+                    $periods[$period] = ['used' => $used, 'limit' => $cap, 'remaining' => $cap > 0 ? max(0, $cap - $used) : null,
+                        'status' => $limited ? 'limited' : 'ready', 'retry_at' => $limited ? gmdate(DATE_ATOM, self::resetAt($period, $now)) : null,
+                        'resets_at' => gmdate(DATE_ATOM, self::resetAt($period, $now)), 'provider_blocked' => $providerBlocked];
+                }
+                $blocked = array_keys(array_filter($periods, fn(array $p): bool => $p['status'] === 'limited'));
+                $retryAt = $blocked ? max(array_map(fn(string $period): int => strtotime($periods[$period]['retry_at'] ?? gmdate(DATE_ATOM, $now + 3600)), $blocked)) : null;
+                $status = $native ? 'native' : (!$enabled ? 'disabled' : ($blocked ? 'limited' : 'ready'));
                 $result[$connection['id']] = $stats + ['used' => $usage, 'limit' => $limit,
                     'remaining' => $limit > 0 ? max(0, $limit - $usage) : null, 'status' => $status,
-                    'retry_at' => $limit > 0 && $usage >= $limit ? $this->retryAt($data['quotas'][$scope] ?? [], $now, $usage - $limit + 1) : null,
+                    'retry_at' => $retryAt ? gmdate(DATE_ATOM, $retryAt) : null, 'periods' => $periods, 'blocked_by' => $blocked,
                     'history' => array_values(array_reverse($history))];
             }
             return $result;
         });
     }
 
-    public static function effectiveLimit(array $connection, array $connections): int
+    public static function effectiveLimit(array $connection, array $connections, string $field = 'hourly_limit'): int
     {
-        $limit = (int) ($connection['hourly_limit'] ?? 0);
+        if (!in_array($field, ['hourly_limit', 'daily_limit', 'monthly_limit'], true)) { throw new \InvalidArgumentException('Invalid quota period.'); }
+        $limit = (int) ($connection[$field] ?? 0);
         if (($connection['quota_group'] ?? '') === '') { return $limit; }
         foreach ($connections as $member) {
-            $candidate = (int) ($member['hourly_limit'] ?? 0);
+            $candidate = (int) ($member[$field] ?? 0);
             if (($member['quota_group'] ?? '') === $connection['quota_group'] && $candidate > 0) {
                 $limit = $limit > 0 ? min($limit, $candidate) : $candidate;
             }
@@ -123,11 +154,72 @@ final class HourlyQuota
                 if (($minute + 1) * 60 <= $now - 3600) { continue; }
                 $scope = self::scope($connection);
                 $data['quotas'][$scope][$minute] = ($data['quotas'][$scope][$minute] ?? 0) + $count;
+                foreach (['daily', 'monthly'] as $period) { $this->incrementPeriod($data, $scope, $period, (int) $minute * 60, $count); }
                 $this->increment($data, $connection['id'], (int) $minute, 'accepted', $count);
             }
             $data['imports'][$reference] = $now;
             return [];
         }, true);
+    }
+
+    /** Seed actual dashboard usage once under a controlled activation. Never lower charged capacity. */
+    public function importPeriodUsage(array $connection, int $daily, int $monthly, string $reference): void
+    {
+        if ($daily < 0 || $monthly < $daily || $monthly > 1000000000 || !preg_match('/^[a-z0-9-]{1,80}$/D', $reference)) {
+            throw new \InvalidArgumentException('Invalid provider usage import.');
+        }
+        $this->transaction(function (array &$data, int $now) use ($connection, $daily, $monthly, $reference): array {
+            if (isset($data['imports'][$reference])) { return []; }
+            $scope = self::scope($connection);
+            foreach (['daily' => $daily, 'monthly' => $monthly] as $period => $observed) {
+                $key = self::periodKey($period, $now); $pending = 0;
+                foreach ($data['reservations'] as $reservation) {
+                    if ($reservation['scope'] === $scope && self::periodKey($period, $reservation['minute'] * 60) === $key) { $pending += $reservation['recipients']; }
+                }
+                $current = $data['periods'][$scope][$period][$key] ?? 0;
+                $data['periods'][$scope][$period][$key] = max($current, $observed + $pending);
+            }
+            $data['imports'][$reference] = $now;
+            return [];
+        }, true);
+    }
+
+    public function block(array $connection, string $period): void
+    {
+        if (!in_array($period, ['daily', 'monthly'], true)) { throw new \InvalidArgumentException('Invalid provider quota period.'); }
+        $this->transaction(function (array &$data, int $now) use ($connection, $period): array {
+            $data['blocks'][self::scope($connection)][$period] = self::resetAt($period, $now);
+            return [];
+        }, true);
+    }
+
+    private static function periodKey(string $period, int $now): string { return gmdate($period === 'daily' ? 'Y-m-d' : 'Y-m', $now); }
+
+    public static function resetAt(string $period, int $now): int
+    {
+        $date = (new \DateTimeImmutable('@'.$now))->setTimezone(new \DateTimeZone('UTC'));
+        return match ($period) {
+            'daily' => $date->modify('tomorrow')->setTime(0, 0)->getTimestamp(),
+            'monthly' => $date->modify('first day of next month')->setTime(0, 0)->getTimestamp(),
+            default => throw new \InvalidArgumentException('Invalid quota period.'),
+        };
+    }
+
+    private function incrementPeriod(array &$data, string $scope, string $period, int $at, int $count): void
+    {
+        $key = self::periodKey($period, $at);
+        $value = ($data['periods'][$scope][$period][$key] ?? 0) + $count;
+        if ($value < 0) { throw new \RuntimeException('Private quota storage invalid.'); }
+        $data['periods'][$scope][$period][$key] = $value;
+    }
+
+    private function periodUsage(array $data, string $scope, string $period, int $now): int
+    {
+        $key = self::periodKey($period, $now); $used = $data['periods'][$scope][$period][$key] ?? 0;
+        foreach ($data['reservations'] as $reservation) {
+            if ($reservation['scope'] === $scope && self::periodKey($period, $reservation['minute'] * 60) !== $key) { $used += $reservation['recipients']; }
+        }
+        return $used;
     }
 
     private function scopeUsage(array $data, string $scope, int $now): int
@@ -167,7 +259,7 @@ final class HourlyQuota
     {
         $now = $this->clock ? ($this->clock)() : time();
         return PrivateStorage::transaction($this->projectDir, 'hourly-usage.json',
-            ['version' => 1, 'connections' => [], 'quotas' => [], 'reservations' => [], 'imports' => []],
+            ['version' => 1, 'connections' => [], 'quotas' => [], 'reservations' => [], 'imports' => [], 'periods' => [], 'blocks' => []],
             function (array &$data) use ($action, $now): array {
                 foreach (['connections', 'quotas', 'reservations', 'imports'] as $key) {
                     if (!is_array($data[$key] ?? null)) { throw new \RuntimeException('Private quota storage invalid.'); }
@@ -200,6 +292,39 @@ final class HourlyQuota
                     }
                     if (($reservation['minute'] + 1) * 60 <= $now - 86400) { unset($data['reservations'][$token]); }
                 }
+                // Upgrade the existing ledger in memory; the next write persists it atomically.
+                if (!array_key_exists('periods', $data)) {
+                    $data['periods'] = [];
+                    foreach ($data['quotas'] as $scope => $buckets) {
+                        foreach ($buckets as $minute => $count) {
+                            foreach (['daily', 'monthly'] as $period) { $this->incrementPeriod($data, $scope, $period, (int) $minute * 60, $count); }
+                        }
+                    }
+                }
+                $data += ['blocks' => []];
+                if (!is_array($data['periods']) || !is_array($data['blocks'])) { throw new \RuntimeException('Private quota storage invalid.'); }
+                foreach ($data['periods'] as &$periods) {
+                    if (!is_array($periods)) { throw new \RuntimeException('Private quota storage invalid.'); }
+                    foreach ($periods as $period => &$buckets) {
+                        if (!in_array($period, ['daily', 'monthly'], true) || !is_array($buckets)) { throw new \RuntimeException('Private quota storage invalid.'); }
+                        foreach ($buckets as $key => $count) {
+                            $format = $period === 'daily' ? '!Y-m-d' : '!Y-m';
+                            $date = \DateTimeImmutable::createFromFormat($format, (string) $key, new \DateTimeZone('UTC'));
+                            if (!$date || self::periodKey($period, $date->getTimestamp()) !== (string) $key || !is_int($count) || $count < 0) { throw new \RuntimeException('Private quota storage invalid.'); }
+                            if ($date->getTimestamp() < $now - ($period === 'daily' ? 45 : 400) * 86400) { unset($buckets[$key]); }
+                        }
+                    }
+                    unset($buckets);
+                }
+                unset($periods);
+                foreach ($data['blocks'] as &$periods) {
+                    if (!is_array($periods)) { throw new \RuntimeException('Private quota storage invalid.'); }
+                    foreach ($periods as $period => $until) {
+                        if (!in_array($period, ['daily', 'monthly'], true) || !is_int($until)) { throw new \RuntimeException('Private quota storage invalid.'); }
+                        if ($until <= $now) { unset($periods[$period]); }
+                    }
+                }
+                unset($periods);
                 return $action($data, $now);
             }, $write);
     }

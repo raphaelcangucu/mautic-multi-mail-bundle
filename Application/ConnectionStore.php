@@ -98,6 +98,8 @@ final class ConnectionStore
                 'reply_to' => empty($input['reply_to']) ? '' : $this->email($input['reply_to'], 'Responder para'),
                 'fallback' => $input['fallback'] ?? '', 'settings' => [], 'secrets' => [],
                 'hourly_limit' => $this->integer($input['hourly_limit'] ?? ($previous['hourly_limit'] ?? 0), 1000000),
+                'daily_limit' => $this->integer($input['daily_limit'] ?? ($previous['daily_limit'] ?? 0), 1000000),
+                'monthly_limit' => $this->integer($input['monthly_limit'] ?? ($previous['monthly_limit'] ?? 0), 1000000),
                 'priority' => $this->integer($input['priority'] ?? ($previous['priority'] ?? 100), 9999),
                 'pool_enabled' => $this->boolean($input['pool_enabled'] ?? ($previous['pool_enabled'] ?? ($provider !== 'native'))),
                 'quota_group' => $input['quota_group'] ?? ($previous['quota_group'] ?? ''),
@@ -106,13 +108,16 @@ final class ConnectionStore
             if (!is_string($connection['quota_group']) || !preg_match('/^[a-z0-9_-]{0,64}$/D', $connection['quota_group'])) {
                 throw new \InvalidArgumentException('mautic.multimail.quota.invalid_group');
             }
-            if ($provider === 'native' && ($connection['hourly_limit'] !== 0 || $connection['pool_enabled'] || $connection['quota_group'] !== '')) {
+            if ($provider === 'native' && ($connection['hourly_limit'] !== 0 || $connection['daily_limit'] !== 0 || $connection['monthly_limit'] !== 0 || $connection['pool_enabled'] || $connection['quota_group'] !== '')) {
                 throw new \InvalidArgumentException('mautic.multimail.quota.native_invalid');
             }
             if ($previous && $previous['quota_group'] !== $connection['quota_group']) {
-                $usage = (new HourlyQuota($this->projectDir))->snapshot([$previous]);
+                $usage = (new HourlyQuota($this->projectDir))->snapshot(array_values($data['connections']));
                 $previousUsage = $usage[$id];
-                if ($previousUsage['used'] > 0) {
+                if ($previousUsage['used'] > 0
+                    || (($previousUsage['periods']['daily']['limit'] > 0 || HourlyQuota::effectiveLimit($connection, $data['connections'], 'daily_limit') > 0) && $previousUsage['periods']['daily']['used'] > 0)
+                    || (($previousUsage['periods']['monthly']['limit'] > 0 || HourlyQuota::effectiveLimit($connection, $data['connections'], 'monthly_limit') > 0) && $previousUsage['periods']['monthly']['used'] > 0)
+                    || $previousUsage['periods']['daily']['provider_blocked'] || $previousUsage['periods']['monthly']['provider_blocked']) {
                     throw new \InvalidArgumentException('mautic.multimail.quota.group_busy');
                 }
             }
@@ -280,13 +285,25 @@ final class ConnectionStore
             $connection = $data['connections'][$id] ?? throw new \RuntimeException('Mail connection unavailable.');
             if ($connection['provider'] === 'native') { throw new \InvalidArgumentException('Native quotas are not wrapped.'); }
             return (new HourlyQuota($this->projectDir))->reserve($connection, $recipients,
-                HourlyQuota::effectiveLimit($connection, array_values($data['connections'])));
+                HourlyQuota::effectiveLimit($connection, array_values($data['connections'])),
+                HourlyQuota::effectiveLimit($connection, array_values($data['connections']), 'daily_limit'),
+                HourlyQuota::effectiveLimit($connection, array_values($data['connections']), 'monthly_limit'));
         });
     }
 
     public function finishReservation(string $token, string $outcome): void
     {
         (new HourlyQuota($this->projectDir))->finish($token, $outcome);
+    }
+
+    /** A confirmed provider quota refusal also blocks other credentials of the same account. */
+    public function blockProviderQuota(string $id, string $period): void
+    {
+        $this->transaction(function (array $data) use ($id, $period): array {
+            $connection = $data['connections'][$id] ?? throw new \RuntimeException('Mail connection unavailable.');
+            (new HourlyQuota($this->projectDir))->block($connection, $period);
+            return [];
+        });
     }
 
     private function integer(mixed $value, int $maximum): int
@@ -309,7 +326,7 @@ final class ConnectionStore
             function (array &$data) use ($action): array {
                 if (!is_int($data['revision'] ?? null) || !is_array($data['connections'] ?? null)) { throw new \RuntimeException('Private mail configuration invalid.'); }
                 foreach ($data['connections'] as &$connection) {
-                    $connection += ['hourly_limit' => 0, 'priority' => 100, 'pool_enabled' => $connection['provider'] !== 'native', 'quota_group' => ''];
+                    $connection += ['hourly_limit' => 0, 'daily_limit' => 0, 'monthly_limit' => 0, 'priority' => 100, 'pool_enabled' => $connection['provider'] !== 'native', 'quota_group' => ''];
                 }
                 unset($connection);
                 $this->validateGraph($data['connections']);
