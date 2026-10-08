@@ -12,7 +12,10 @@
     "symfony/brevo-mailer": "^7.4",
     "symfony/mime": "^7.4",
     "symfony/event-dispatcher": "^7.4",
-    "symfony/dependency-injection": "^7.4"
+    "symfony/dependency-injection": "^7.4",
+    "symfony/mailjet-mailer": "^7.4",
+    "symfony/mailer-send-mailer": "^7.4",
+    "symfony/mailchimp-mailer": "^7.4"
   },
   "config": {
     "allow-plugins": false,
@@ -20,5 +23,12 @@
     "platform": {
       "php": "8.2.0"
     }
+  },
+  "require-dev": {
+    "symfony/form": "^7.4",
+    "symfony/http-foundation": "^7.4",
+    "symfony/security-csrf": "^7.4",
+    "symfony/translation": "^7.4",
+    "symfony/validator": "^7.4"
   }
 }

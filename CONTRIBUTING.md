@@ -7,6 +7,7 @@ composer install --working-dir=build/dependencies
 php Tests/connections.php
 php Tests/transports.php
 php Tests/native-compatibility.php
+php Tests/example-sending.php
 node --check Assets/js/connections.js
 python3 build/package.py
 ```

@@ -2,10 +2,16 @@
 {% block mauticContent %}multimailconnections{% endblock %}
 {% block headerTitle %}Multi Mail · Conexões de e-mail{% endblock %}
 {% block content %}
+<style>#mail-connections [hidden] { display: none !important; } #mail-test-result { white-space: pre-line; overflow-wrap: anywhere; }</style>
 <div class="pa-md" id="mail-connections">
     {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
     {% if saved %}<div class="alert alert-success" role="status">Configuração salva.</div>{% endif %}
     <p class="text-muted">Cadastre contas SMTP e APIs e escolha a conexão de reserva de cada uma. O cadastro não altera os envios atuais do Mautic.</p>
+    <div class="alert {{ transport.connection_id ? 'alert-success' : 'alert-info' }}">
+        <i class="ri-route-line" aria-hidden="true"></i>
+        <strong>{{ 'mautic.multimail.transport.current'|trans }}: {{ transport.name ?: transport.scheme }}</strong>
+        <p class="mb-0">{{ 'mautic.multimail.transport.help'|trans }}</p>
+    </div>
     {% if editing %}
     <div class="alert alert-info"><div style="min-width:0;overflow-wrap:anywhere">
         <strong>Usar esta conexão no envio do Mautic</strong>
@@ -21,16 +27,39 @@
                 <tbody>
                 {% for connection in data.connections %}
                     <tr>
-                        <td><strong>{{ connection.name }}</strong></td>
+                        <td><strong>{{ connection.name }}</strong>{% if transport.connection_id == connection.id %}<br><span class="label label-success">{{ 'mautic.multimail.transport.active'|trans }}</span>{% else %}<br><small class="text-muted">{{ 'mautic.multimail.transport.registered'|trans }}</small>{% endif %}</td>
                         <td>{{ providers[connection.provider].label }}</td>
                         <td>{{ connection.from_email }}{% if connection.reply_to %}<br><small class="text-muted">Respostas: {{ connection.reply_to }}</small>{% endif %}</td>
                         <td>{% if connection.chain %}{% for step in connection.chain %}{{ step.name }}{% if not loop.last %} → {% endif %}{% endfor %}{% else %}<span class="text-muted">Sem fallback</span>{% endif %}</td>
                         <td><i class="ri-lock-line" aria-hidden="true"></i> Salvas</td>
-                        <td><a class="btn btn-default btn-sm" href="{{ path('mautic_multimail_connections', {edit: connection.id}) }}">Editar<span class="sr-only"> {{ connection.name }}</span></a></td>
+                        <td><div class="btn-group"><a class="btn btn-default btn-sm" href="{{ path('mautic_multimail_connections', {test: connection.id}) }}#mail-test"><i class="ri-send-plane-line" aria-hidden="true"></i> {{ 'mautic.multimail.test.action'|trans }}<span class="sr-only"> {{ connection.name }}</span></a><a class="btn btn-default btn-sm" href="{{ path('mautic_multimail_connections', {edit: connection.id}) }}">Editar<span class="sr-only"> {{ connection.name }}</span></a></div></td>
                     </tr>
                 {% else %}<tr><td colspan="6" class="text-muted pa-md">Adicione sua primeira conexão abaixo.</td></tr>{% endfor %}
                 </tbody>
             </table>
+        </div>
+    </div>
+    <div class="panel panel-default" id="mail-test">
+        <div class="panel-heading"><div class="panel-title"><i class="ri-mail-check-line" aria-hidden="true"></i> {{ 'mautic.multimail.test.title'|trans }}</div></div>
+        <div class="panel-body">
+            <p class="text-muted">{{ 'mautic.multimail.test.help'|trans }}</p>
+            <form method="post" action="{{ path('mautic_multimail_connections') }}" id="mail-test-form" data-error="{{ 'mautic.multimail.test.unavailable'|trans }}" data-pending="{{ 'mautic.multimail.test.pending'|trans }}">
+                <input type="hidden" name="_token" value="{{ csrf_token('multimail_connections') }}">
+                <input type="hidden" name="revision" value="{{ data.revision }}">
+                <input type="hidden" name="action" value="test">
+                <div class="row">
+                    <div class="col-md-6 form-group"><label for="mail-test-connection">{{ 'mautic.multimail.example.connection'|trans }}</label>
+                        <select name="id" id="mail-test-connection" class="form-control" required>
+                            <option value="">{{ 'mautic.multimail.example.choose'|trans }}</option>
+                            {% for connection in data.connections %}<option value="{{ connection.id }}" data-from="{{ connection.from_name }} &lt;{{ connection.from_email }}&gt;" data-reply="{{ connection.reply_to }}" {{ connection.id == testId ? 'selected' : '' }}>{{ connection.name }} · {{ providers[connection.provider].label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 form-group"><label for="mail-test-recipient">{{ 'mautic.multimail.test.recipient'|trans }}</label><input type="email" name="recipient" id="mail-test-recipient" class="form-control" maxlength="254" value="{{ testRecipient }}" required></div>
+                </div>
+                <p class="help-block"><strong>{{ 'mautic.multimail.test.from'|trans }}:</strong> <span id="mail-test-from">—</span><br><strong>{{ 'mautic.multimail.test.reply'|trans }}:</strong> <span id="mail-test-reply">—</span></p>
+                <button type="submit" class="btn btn-primary" {{ data.connections is empty ? 'disabled' : '' }}><i class="ri-send-plane-line" aria-hidden="true"></i> {{ 'mautic.multimail.test.send'|trans }}</button>
+            </form>
+            <div id="mail-test-result" class="alert {{ lastTest and lastTest.result.status == 'accepted' ? 'alert-success' : 'alert-warning' }} mt-md mb-0" role="status" aria-live="polite" data-connection="{{ lastTest.connection_id|default('') }}" {{ not lastTest ? 'hidden' : '' }}>{% if lastTest %}{{ lastTest.result.message }} · {{ lastTest.result.reference }}{% for detail in lastTest.result.details %}{{ '\n' }}{{ detail }}{% endfor %}{% endif %}</div>
         </div>
     </div>
     <div class="panel panel-default">
@@ -65,15 +94,16 @@
                         {% set value = editing and key == provider ? editing.settings[field]|default('') : '' %}
                         <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label>
                         {% if field == 'encryption' %}<select class="form-control" name="settings[{{ field }}]" id="mail-{{ key }}-{{ field }}" {{ key != provider ? 'disabled' : '' }}><option value="tls" {{ value == 'tls' ? 'selected' : '' }}>STARTTLS · 587 ou 2525</option><option value="ssl" {{ value == 'ssl' ? 'selected' : '' }}>SSL/TLS · 465</option></select>
-                        {% elseif field == 'region' and key == 'mailgun' %}<select class="form-control" name="settings[region]" id="mail-mailgun-region" {{ key != provider ? 'disabled' : '' }}><option value="us" {{ value == 'us' ? 'selected' : '' }}>Estados Unidos</option><option value="eu" {{ value == 'eu' ? 'selected' : '' }}>Europa</option></select>
+                        {% elseif field == 'region' and key in ['mailgun', 'sparkpost'] %}<select class="form-control" name="settings[region]" id="mail-{{ key }}-region" {{ key != provider ? 'disabled' : '' }}><option value="us" {{ value == 'us' ? 'selected' : '' }}>Estados Unidos</option><option value="eu" {{ value == 'eu' ? 'selected' : '' }}>Europa</option></select>
                         {% else %}<input class="form-control" name="settings[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="{{ value ?: (field == 'port' ? '587' : '') }}" placeholder="{{ field == 'region' and key == 'ses' ? 'sa-east-1' : '' }}" maxlength="253" required {{ key != provider ? 'disabled' : '' }}>{% endif %}
                         </div>
                     {% endfor %}
                     {% for field in item.secrets %}
                         {% set labels = {password: 'Senha SMTP', api_key: 'Chave da API', access_key: 'AWS Access Key ID', secret_key: 'AWS Secret Access Key', dsn: 'DSN do transporte instalado'} %}
-                        <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label><input type="password" class="form-control" name="secrets[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="" maxlength="{{ field == 'dsn' ? 16384 : 4096 }}" autocomplete="new-password" placeholder="{{ editing ? 'Salva · deixe vazio para manter' : 'Informe a credencial' }}" {{ not editing ? 'required' : '' }} {{ key != provider ? 'disabled' : '' }}></div>
+                        <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ key == 'mailjet' and field == 'secret_key' ? 'mautic.multimail.mailjet.secret'|trans : labels[field] }}</label><input type="password" class="form-control" name="secrets[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="" maxlength="{{ field == 'dsn' ? 16384 : 4096 }}" autocomplete="new-password" placeholder="{{ editing ? 'Salva · deixe vazio para manter' : 'Informe a credencial' }}" {{ not editing ? 'required' : '' }} {{ key != provider ? 'disabled' : '' }}></div>
                     {% endfor %}
                     </div>
+                    {% if key in ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go'] %}<p class="help-block">{{ ('mautic.multimail.provider.' ~ key ~ '.help')|trans }}</p>{% endif %}
                     {% if key == 'native' %}<p class="help-block">Use o DSN do adaptador já instalado no Mautic, incluindo opções e credenciais codificadas. O plugin mantém o transporte original, inclusive interfaces de lote e bounces quando fornecidas pelo adaptador. O DSN fica privado; deixe vazio ao editar para mantê-lo.</p>{% endif %}
                 </fieldset>
                 {% endfor %}
@@ -89,5 +119,5 @@
         </div>
     </div>
 </div>
-{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=3', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
+{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=6', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
 {% endblock %}

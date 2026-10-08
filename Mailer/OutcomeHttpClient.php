@@ -9,16 +9,25 @@ use Symfony\Contracts\HttpClient\{HttpClientInterface, ResponseInterface, Respon
 final class OutcomeHttpClient implements HttpClientInterface
 {
     private ?int $lastStatus = null;
+    private ?string $messageId = null;
 
-    public function __construct(private HttpClientInterface $client)
+    public function __construct(private HttpClientInterface $client, private readonly ?string $provider = null)
     {
     }
 
     public function request(string $method, string $url, #[\SensitiveParameter] array $options = []): ResponseInterface
     {
         $this->lastStatus = null;
+        $this->messageId = null;
+        if ($this->provider !== null) {
+            // Never forward credentials to a redirect target or retry an ambiguous request.
+            $options['max_redirects'] = 0;
+        }
         $response = $this->client->request($method, $url, $options);
         $this->lastStatus = $response->getStatusCode();
+        if ($this->provider !== null) {
+            $this->messageId = ProviderResponseGuard::acceptedId($this->provider, $response, $options['json'] ?? []);
+        }
 
         return $response;
     }
@@ -40,5 +49,15 @@ final class OutcomeHttpClient implements HttpClientInterface
     {
         // Never retry an HTTP timeout, a 5xx or a successful acceptance on another provider.
         return in_array($this->lastStatus, [401, 403, 429], true);
+    }
+
+    public function statusCode(): ?int
+    {
+        return $this->lastStatus;
+    }
+
+    public function providerMessageId(): ?string
+    {
+        return $this->messageId;
     }
 }

@@ -14,7 +14,10 @@
     "symfony/sendgrid-mailer": "^7.4",
     "symfony/postmark-mailer": "^7.4",
     "symfony/brevo-mailer": "^7.4",
-    "symfony/dependency-injection": "^7.4"
+    "symfony/dependency-injection": "^7.4",
+    "symfony/mailjet-mailer": "^7.4",
+    "symfony/mailer-send-mailer": "^7.4",
+    "symfony/mailchimp-mailer": "^7.4"
   },
   "autoload": {
     "psr-4": {

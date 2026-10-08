@@ -33,10 +33,13 @@ jobs:
           symfony/mailer:7.4.12 symfony/http-client:7.4.9 symfony/mime:7.4.13
           symfony/event-dispatcher:7.4.14 symfony/dependency-injection:7.4.14
           --with-all-dependencies --no-interaction --no-progress
-      - run: find Application Config Controller DependencyInjection Mailer Tests -name '*.php' -exec php -l '{}' ';'
+      - run: find Application Config Controller DependencyInjection EventSubscriber Form Mailer Tests -name '*.php' -exec php -l '{}' ';'
       - run: php -l MauticMultiMailBundle.php
       - run: node --check Assets/js/connections.js
+      - run: node Tests/connections-ui.cjs
       - run: php Tests/connections.php
       - run: php Tests/transports.php
+      - run: php Tests/provider-transports.php
       - run: php Tests/native-compatibility.php
+      - run: php Tests/example-sending.php
       - run: python3 build/package.py

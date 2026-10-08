@@ -17,10 +17,20 @@ final class Attempt
         return $this->outcome->confirmedNotAccepted();
     }
 
+    public function httpStatus(): ?int
+    {
+        return $this->outcome instanceof OutcomeHttpClient ? $this->outcome->statusCode() : null;
+    }
+
     public function close(): void
     {
         if ($this->transport instanceof ConfirmedSmtpTransport) {
             try { $this->transport->stop(); } catch (\Throwable) { /* Shutdown must not change a send's result. */ }
         }
+    }
+
+    public function providerMessageId(): ?string
+    {
+        return $this->outcome instanceof OutcomeHttpClient ? $this->outcome->providerMessageId() : null;
     }
 }
