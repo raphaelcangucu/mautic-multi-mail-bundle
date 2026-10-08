@@ -2,9 +2,13 @@ from pathlib import Path
 import zipfile
 import subprocess
 import os
+import re
 
 root = Path(__file__).resolve().parents[1]
-output = root / 'dist' / 'Mautic-Multi-Mail-v0.3.0.zip'
+match = re.search(r"'version'\s*=>\s*'([0-9]+\.[0-9]+\.[0-9]+)'", (root / 'Config' / 'config.php').read_text())
+if not match:
+    raise SystemExit('Plugin version missing.')
+output = root / 'dist' / ('Mautic-Multi-Mail-v' + match.group(1) + '.zip')
 output.parent.mkdir(exist_ok=True)
 vendor = root / 'build' / 'dependencies' / 'vendor'
 if not (vendor / 'autoload.php').is_file():
@@ -28,7 +32,7 @@ with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         if not path.is_file():
             continue
         relative = path.relative_to(root)
-        if relative.parts[0] in ('.git', 'dist', 'build', 'vendor', '.github') or relative.name in ('.gitignore', '.DS_Store', 'connections.json', 'connections.lock') or relative.name.startswith('.env') or any(part.endswith('-private') for part in relative.parts):
+        if relative.parts[0] in ('.git', 'dist', 'build', 'vendor', '.github') or relative.name in ('.gitignore', '.DS_Store', 'connections.json', 'connections.lock', 'hourly-usage.json', 'hourly-usage.lock') or relative.name.startswith('.env') or any(part.endswith('-private') for part in relative.parts):
             continue
         archive.write(path, 'MauticMultiMailBundle/' + str(relative))
     for path in vendor.rglob('*'):

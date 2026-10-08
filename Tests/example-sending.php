@@ -247,6 +247,13 @@ namespace {
         $request->attributes->set('objectAction', 'sendExample'); $request->setMethod('GET');
         checkExample($routing->selected() === null, 'GET cannot activate sending');
         echo "PASS: isolated diagnostics, no reserve on refusal/uncertainty, safe recipient/revisions/status, explicit native example routing, MIME/attachments preserved, global unchanged, CSRF/choice/admin/request guards; no kernel/database/network\n";
+        $usageRequest = Request::create('/s/mail-connections?usage=1', 'GET');
+        $usageResponse = $controller->index($usageRequest, new UserHelper(), $store, $tester, new CoreParametersHelper(), $translator);
+        $usagePayload = json_decode($usageResponse->getContent(), true);
+        checkExample($usageResponse->getStatusCode() === 200 && isset($usagePayload['connections'][0]['hourly'])
+            && !str_contains($usageResponse->getContent(), 'synthetic-secret') && !isset($usagePayload['connections'][0]['secret_configured']), 'Administrator counters response excludes credential metadata and secrets');
+        try { $controller->index($usageRequest, new UserHelper(false), $store, $tester, new CoreParametersHelper(), $translator); throw new \LogicException('Expected denial'); }
+        catch (\RuntimeException $error) { checkExample($error->getMessage() === 'denied', 'Non-admin cannot inspect account counters'); }
     } finally {
         $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
         foreach ($files as $file) { $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname()); }

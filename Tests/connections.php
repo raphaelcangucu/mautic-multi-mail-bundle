@@ -5,6 +5,8 @@ declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
 require __DIR__.'/../Application/ConnectionStore.php';
+require __DIR__.'/../Application/PrivateStorage.php';
+require __DIR__.'/../Application/HourlyQuota.php';
 require __DIR__.'/../Application/NativeDsnGuard.php';
 
 use MauticPlugin\MauticMultiMailBundle\Application\ConnectionStore;

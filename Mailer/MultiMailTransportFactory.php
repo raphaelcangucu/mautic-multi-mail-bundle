@@ -25,13 +25,13 @@ final class MultiMailTransportFactory implements TransportFactoryInterface
     public function create(Dsn $dsn): TransportInterface
     {
         if (!$this->supports($dsn)) { throw new UnsupportedSchemeException($dsn, 'multimail', ['multimail']); }
-        if (!preg_match('/^[a-f0-9]{32}$/D', $dsn->getHost()) || $dsn->getUser() !== null || $dsn->getPassword() !== null || $dsn->getPort() !== null) {
+        if (($dsn->getHost() !== 'auto' && !preg_match('/^[a-f0-9]{32}$/D', $dsn->getHost())) || $dsn->getUser() !== null || $dsn->getPassword() !== null || $dsn->getPort() !== null) {
             throw new InvalidArgumentException('Use apenas o identificador da conexão no transporte Multi Mail.');
         }
 
         try { $connections = $this->store->overview()['connections']; $ids = array_column($connections, 'id'); }
         catch (\Throwable) { throw new InvalidArgumentException('Multi Mail: configuração privada indisponível.'); }
-        if (!in_array($dsn->getHost(), $ids, true)) { throw new InvalidArgumentException('Multi Mail: conexão não cadastrada.'); }
+        if ($dsn->getHost() !== 'auto' && !in_array($dsn->getHost(), $ids, true)) { throw new InvalidArgumentException('Multi Mail: conexão não cadastrada.'); }
 
         foreach ($connections as $connection) {
             if ($connection['id'] === $dsn->getHost() && $connection['provider'] === 'native') {

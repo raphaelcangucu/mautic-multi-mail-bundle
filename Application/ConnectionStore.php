@@ -37,12 +37,18 @@ final class ConnectionStore
     /** Internal server use only; never expose this result through a controller. */
     public function transportChain(string $id, ?int $revision = null): array
     {
-        if (!preg_match('/^[a-f0-9]{32}$/D', $id)) {
+        if ($id !== 'auto' && !preg_match('/^[a-f0-9]{32}$/D', $id)) {
             throw new \InvalidArgumentException('Conexão de envio inválida.');
         }
 
         return $this->transaction(function (array $data) use ($id, $revision): array {
             if ($revision !== null) { $this->checkRevision($data, $revision); }
+            if ($id === 'auto') {
+                $pool = array_values(array_filter($data['connections'], fn(array $connection): bool => $connection['provider'] !== 'native' && $connection['pool_enabled']));
+                usort($pool, fn(array $a, array $b): int => [$a['priority'], $a['id']] <=> [$b['priority'], $b['id']]);
+                foreach ($pool as $connection) { $this->validateProvider($connection); }
+                return $pool;
+            }
             $result = [];
             $next = $id;
             $seen = [];
@@ -91,8 +97,30 @@ final class ConnectionStore
                 'from_name' => $this->text($input['from_name'] ?? null, 'Nome do remetente', 150),
                 'reply_to' => empty($input['reply_to']) ? '' : $this->email($input['reply_to'], 'Responder para'),
                 'fallback' => $input['fallback'] ?? '', 'settings' => [], 'secrets' => [],
+                'hourly_limit' => $this->integer($input['hourly_limit'] ?? ($previous['hourly_limit'] ?? 0), 1000000),
+                'daily_limit' => $this->integer($input['daily_limit'] ?? ($previous['daily_limit'] ?? 0), 1000000),
+                'monthly_limit' => $this->integer($input['monthly_limit'] ?? ($previous['monthly_limit'] ?? 0), 1000000),
+                'priority' => $this->integer($input['priority'] ?? ($previous['priority'] ?? 100), 9999),
+                'pool_enabled' => $this->boolean($input['pool_enabled'] ?? ($previous['pool_enabled'] ?? ($provider !== 'native'))),
+                'quota_group' => $input['quota_group'] ?? ($previous['quota_group'] ?? ''),
                 'updated_by' => $actor, 'updated_at' => gmdate(DATE_ATOM),
             ];
+            if (!is_string($connection['quota_group']) || !preg_match('/^[a-z0-9_-]{0,64}$/D', $connection['quota_group'])) {
+                throw new \InvalidArgumentException('mautic.multimail.quota.invalid_group');
+            }
+            if ($provider === 'native' && ($connection['hourly_limit'] !== 0 || $connection['daily_limit'] !== 0 || $connection['monthly_limit'] !== 0 || $connection['pool_enabled'] || $connection['quota_group'] !== '')) {
+                throw new \InvalidArgumentException('mautic.multimail.quota.native_invalid');
+            }
+            if ($previous && $previous['quota_group'] !== $connection['quota_group']) {
+                $usage = (new HourlyQuota($this->projectDir))->snapshot(array_values($data['connections']));
+                $previousUsage = $usage[$id];
+                if ($previousUsage['used'] > 0
+                    || (($previousUsage['periods']['daily']['limit'] > 0 || HourlyQuota::effectiveLimit($connection, $data['connections'], 'daily_limit') > 0) && $previousUsage['periods']['daily']['used'] > 0)
+                    || (($previousUsage['periods']['monthly']['limit'] > 0 || HourlyQuota::effectiveLimit($connection, $data['connections'], 'monthly_limit') > 0) && $previousUsage['periods']['monthly']['used'] > 0)
+                    || $previousUsage['periods']['daily']['provider_blocked'] || $previousUsage['periods']['monthly']['provider_blocked']) {
+                    throw new \InvalidArgumentException('mautic.multimail.quota.group_busy');
+                }
+            }
             if (!is_string($connection['fallback'])) {
                 throw new \InvalidArgumentException('Fallback inválido.');
             }
@@ -201,9 +229,11 @@ final class ConnectionStore
     private function publicData(array $data): array
     {
         $public = [];
+        $usage = (new HourlyQuota($this->projectDir))->snapshot(array_values($data['connections']));
         foreach ($data['connections'] as $id => $connection) {
             $connection['secret_configured'] = array_fill_keys(array_keys($connection['secrets']), true);
             unset($connection['secrets']);
+            $connection['hourly'] = $usage[$id];
             $connection['chain'] = [];
             $next = $connection['fallback'];
             $seen = [$id => true];
@@ -248,71 +278,59 @@ final class ConnectionStore
         return $value;
     }
 
-    private function transaction(callable $action, bool $write = false): array
+    /** Reserve under the configuration lock, then the quota lock; no network operation holds either. */
+    public function reserve(string $id, int $recipients): array
     {
-        $resolvedProject = realpath($this->projectDir) ?: $this->projectDir;
-        $parent = dirname($resolvedProject);
-        // Atomic-release deployments keep persistent data beside releases, under shared.
-        // A direct checkout uses a private sibling directory outside its document root.
-        $directory = basename($parent) === 'releases' ? dirname($parent).'/shared/inbox-mail-private'
-            : $parent.'/'.basename($resolvedProject).'-multimail-private';
-        clearstatcache(true);
-        if (!file_exists($directory) && !is_link($directory)) {
-            $oldMask = umask(0077);
-            try { @mkdir($directory, 0700); } finally { umask($oldMask); }
-        }
-        $this->privatePath($directory, true);
-        $lockPath = $directory.'/connections.lock';
-        $this->privatePath($lockPath);
-        $oldMask = umask(0077);
-        try { $lock = @fopen($lockPath, 'c+b'); } finally { umask($oldMask); }
-        if (!$lock || !flock($lock, LOCK_EX)) {
-            throw new \RuntimeException('Private mail configuration unavailable.');
-        }
-        try {
-            $this->privatePath($lockPath);
-            $path = $directory.'/connections.json';
-            $this->privatePath($path);
-            $data = ['version' => 1, 'revision' => 0, 'connections' => []];
-            if (file_exists($path)) {
-                try { $data = json_decode((string) file_get_contents($path), true, 32, JSON_THROW_ON_ERROR); }
-                catch (\JsonException) { throw new \RuntimeException('Private mail configuration invalid.'); }
-                if (!is_array($data) || ($data['version'] ?? null) !== 1 || !is_int($data['revision'] ?? null)
-                    || !is_array($data['connections'] ?? null)) {
-                    throw new \RuntimeException('Private mail configuration invalid.');
-                }
-                $this->validateGraph($data['connections']);
-            }
-            $result = $action($data);
-            if ($write) {
-                $temporary = $path.'.tmp-'.bin2hex(random_bytes(8));
-                $oldMask = umask(0077);
-                try { $handle = @fopen($temporary, 'xb'); } finally { umask($oldMask); }
-                if (!$handle) { throw new \RuntimeException('Private mail configuration unavailable.'); }
-                try {
-                    $encoded = json_encode($data, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-                    if (fwrite($handle, $encoded) !== strlen($encoded) || !fflush($handle) || !fsync($handle)) {
-                        throw new \RuntimeException('Private mail configuration unavailable.');
-                    }
-                    fclose($handle); $handle = null;
-                    $this->privatePath($path);
-                    if (!rename($temporary, $path)) { throw new \RuntimeException('Private mail configuration unavailable.'); }
-                } finally {
-                    if (is_resource($handle)) { fclose($handle); }
-                    if (file_exists($temporary)) { unlink($temporary); }
-                }
-            }
-
-            return $result;
-        } finally { flock($lock, LOCK_UN); fclose($lock); }
+        return $this->transaction(function (array $data) use ($id, $recipients): array {
+            $connection = $data['connections'][$id] ?? throw new \RuntimeException('Mail connection unavailable.');
+            if ($connection['provider'] === 'native') { throw new \InvalidArgumentException('Native quotas are not wrapped.'); }
+            return (new HourlyQuota($this->projectDir))->reserve($connection, $recipients,
+                HourlyQuota::effectiveLimit($connection, array_values($data['connections'])),
+                HourlyQuota::effectiveLimit($connection, array_values($data['connections']), 'daily_limit'),
+                HourlyQuota::effectiveLimit($connection, array_values($data['connections']), 'monthly_limit'));
+        });
     }
 
-    private function privatePath(string $path, bool $directory = false): void
+    public function finishReservation(string $token, string $outcome): void
     {
-        clearstatcache(true, $path);
-        if (is_link($path) || (file_exists($path) && (($directory ? !is_dir($path) : !is_file($path)) || (fileperms($path) & 0077) !== 0))
-            || ($directory && !is_dir($path))) {
-            throw new \RuntimeException('Private mail configuration unavailable.');
+        (new HourlyQuota($this->projectDir))->finish($token, $outcome);
+    }
+
+    /** A confirmed provider quota refusal also blocks other credentials of the same account. */
+    public function blockProviderQuota(string $id, string $period): void
+    {
+        $this->transaction(function (array $data) use ($id, $period): array {
+            $connection = $data['connections'][$id] ?? throw new \RuntimeException('Mail connection unavailable.');
+            (new HourlyQuota($this->projectDir))->block($connection, $period);
+            return [];
+        });
+    }
+
+    private function integer(mixed $value, int $maximum): int
+    {
+        if ((!is_int($value) && (!is_string($value) || !ctype_digit($value))) || strlen((string) $value) > 7 || (int) $value < 0 || (int) $value > $maximum) {
+            throw new \InvalidArgumentException('mautic.multimail.quota.invalid_number');
         }
+        return (int) $value;
+    }
+
+    private function boolean(mixed $value): bool
+    {
+        if (!in_array($value, [true, false, 0, 1, '0', '1'], true)) { throw new \InvalidArgumentException('mautic.multimail.quota.invalid_number'); }
+        return in_array($value, [true, 1, '1'], true);
+    }
+
+    private function transaction(callable $action, bool $write = false): array
+    {
+        return PrivateStorage::transaction($this->projectDir, 'connections.json', ['version' => 1, 'revision' => 0, 'connections' => []],
+            function (array &$data) use ($action): array {
+                if (!is_int($data['revision'] ?? null) || !is_array($data['connections'] ?? null)) { throw new \RuntimeException('Private mail configuration invalid.'); }
+                foreach ($data['connections'] as &$connection) {
+                    $connection += ['hourly_limit' => 0, 'daily_limit' => 0, 'monthly_limit' => 0, 'priority' => 100, 'pool_enabled' => $connection['provider'] !== 'native', 'quota_group' => ''];
+                }
+                unset($connection);
+                $this->validateGraph($data['connections']);
+                return $action($data);
+            }, $write);
     }
 }
