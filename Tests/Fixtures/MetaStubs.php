@@ -297,19 +297,50 @@ namespace MauticPlugin\MauticMultiMailBundle\Tests\Fixtures {
         public array $objects = [];
         public int $flushes = 0;
         public array $locks = [];
+        /**
+         * Changes Mautic would silently drop. Its ClassMetadataBuilder sets DEFERRED_EXPLICIT on every
+         * entity, so flush() writes only what was persist()ed since the previous flush; a setter
+         * followed by a bare flush() never reaches the database.
+         *
+         * @var list<string>
+         */
+        public array $unsaved = [];
         private int $sequence = 0;
+        /** @var array<int, true> */
+        private array $pending = [];
+        /** @var array<int, string> what the "database" holds for each managed object */
+        private array $saved = [];
 
         public function persist(object $object): void
         {
             $this->objects[$object::class][spl_object_id($object)] = $object;
+            $this->pending[spl_object_id($object)] = true;
         }
 
         public function flush(): void
         {
             ++$this->flushes;
             foreach ($this->objects as $objects) {
-                foreach ($objects as $object) { if (property_exists($object, 'id') && $object->id === null) { $object->id = ++$this->sequence; } }
+                foreach ($objects as $object) {
+                    if (property_exists($object, 'id') && $object->id === null) { $object->id = ++$this->sequence; }
+                    $key = spl_object_id($object);
+                    $state = self::state($object);
+                    if (isset($this->pending[$key])) {
+                        $this->saved[$key] = $state;
+                    } elseif (isset($this->saved[$key]) && $this->saved[$key] !== $state) {
+                        $caller = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)[0] ?? [];
+                        $this->unsaved[] = (new \ReflectionClass($object))->getShortName().'#'.($object->id ?? '?').' (flush from '.basename($caller['file'] ?? '?').':'.($caller['line'] ?? '?').')';
+                        $this->saved[$key] = $state;
+                    }
+                }
             }
+            $this->pending = [];
+        }
+
+        /** Scalar and array fields only: a change in a related entity belongs to that entity. */
+        private static function state(object $object): string
+        {
+            return serialize(array_filter((array) $object, static fn (mixed $value): bool => !is_object($value)));
         }
 
         public function find(string $className, mixed $id): ?object

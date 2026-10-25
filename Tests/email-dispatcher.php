@@ -148,9 +148,10 @@ try {
     $dnc->blocked = [];
     failsWith(fn() => $dispatcher->dispatch($job(['recipient' => 'not an address'])), InvalidArgumentException::class, 'Invalid recipient');
     failsWith(fn() => $dispatcher->dispatch($job(['subject' => ''])), InvalidArgumentException::class, 'Empty subject');
-    $asset->setStatus('inactive');
+    // Fixture changes are persisted, as Mautic's explicit change tracking requires (see the check at the end).
+    $asset->setStatus('inactive'); $em->persist($asset);
     failsWith(fn() => $dispatcher->dispatch($job()), DomainException::class, 'Inactive account');
-    $asset->setStatus('active');
+    $asset->setStatus('active'); $em->persist($asset);
     $store->save(array_replace($input, ['id' => $connectionId, 'conversational' => '0', 'secrets' => ['password' => '']]), $store->overview()['revision'], 1);
     failsWith(fn() => $dispatcher->dispatch($job()), DomainException::class, 'Connection no longer conversational');
     $store->save(array_replace($input, ['id' => $connectionId, 'hourly_limit' => 1, 'secrets' => ['password' => '']]), $store->overview()['revision'], 1);
@@ -159,9 +160,12 @@ try {
     chmod($root.'/project-multimail-private/connections.json', 0644);
     failsWith(fn() => $dispatcher->dispatch($job()), ChannelTemporarilyUnavailable::class, 'Unreadable private registry retries, never uncertain');
     chmod($root.'/project-multimail-private/connections.json', 0600);
-    $asset->setExternalId(str_repeat('f', 32));
+    $asset->setExternalId(str_repeat('f', 32)); $em->persist($asset);
     failsWith(fn() => $dispatcher->dispatch($job()), DomainException::class, 'Removed connection fails, never uncertain');
     dispatched(count($servers) === $count, 'No SMTP session for refusals, quota or removed connections');
+    // Mautic's DEFERRED_EXPLICIT tracking: a change flushed without persist() never reaches the database.
+    // That is how a sending e-mail once showed twice in the app (messageLogId was set but not saved).
+    dispatched($em->unsaved === [], 'Every change is persisted before flush: '.implode(', ', $em->unsaved));
 } finally {
     foreach (glob($root.'/project-multimail-private/*') ?: [] as $file) { unlink($file); }
     if (is_dir($root.'/project-multimail-private')) { rmdir($root.'/project-multimail-private'); }

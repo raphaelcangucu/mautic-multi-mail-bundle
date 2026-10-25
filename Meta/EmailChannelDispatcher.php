@@ -114,7 +114,9 @@ final class EmailChannelDispatcher implements ChannelDispatcherInterface
         // The queue only stores messageLogId on success, but the Inbox hides a human send's
         // message by that id: without it now, a sending, retried or failed e-mail would show
         // twice in the thread, once as the request and once as this message.
+        // Mautic entities use DEFERRED_EXPLICIT change tracking: every change below needs persist().
         $job->setMessageLogId((int) $message->getId());
+        $this->entityManager->persist($job);
         $this->entityManager->flush();
 
         $outcome = $this->sender->send($connection, $email);
@@ -127,15 +129,18 @@ final class EmailChannelDispatcher implements ChannelDispatcherInterface
                 return $message;
             case SendOutcome::PERMANENT:
                 $message->setStatus('failed')->setError($outcome->reason)->setResponse($response);
+                $this->entityManager->persist($message);
                 $this->entityManager->flush();
                 throw new \DomainException($outcome->reason);
             case SendOutcome::TEMPORARY:
                 $message->setError($outcome->reason)->setResponse($response + ($outcome->retryAt !== null ? ['retry_at' => $outcome->retryAt] : []));
+                $this->entityManager->persist($message);
                 $this->entityManager->flush();
                 throw new ChannelTemporarilyUnavailable($outcome->reason.($outcome->retryAt !== null ? ' Nova tentativa a partir de '.$outcome->retryAt.'.' : ''));
             default:
                 // The Sent-folder check of the poller may still confirm it within 24 hours.
                 $message->setError($outcome->reason)->setResponse($response);
+                $this->entityManager->persist($message);
                 $this->entityManager->flush();
                 throw new \RuntimeException($outcome->reason);
         }

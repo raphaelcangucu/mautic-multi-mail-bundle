@@ -139,12 +139,12 @@ try {
 
     // Auto-reply: an event, not a wake-up.
     $unread = $joao->getUnreadCount();
-    $joao->setStatus('resolved');
+    $joao->setStatus('resolved'); $em->persist($joao);
     $persisted = count($inbox->persisted);
     ingested($ingest($fixture('auto-reply-pt')) === 'auto_reply', 'Auto-reply classified');
     ingested($joao->getUnreadCount() === $unread && $joao->getStatus() === 'resolved' && count($inbox->persisted) === $persisted && $last()->getPayload()['email']['kind'] === 'auto_reply'
         && $last()->getPayload()['email']['auto_reply'] === true, 'No unread, no reopening, no Inbox wake-up');
-    $joao->setStatus('open');
+    $joao->setStatus('open'); $em->persist($joao);
     ingested($ingest($fixture('outlook-ooo-en')) === 'ignored' && $ingest($fixture('list-en')) === 'ignored', 'Auto-reply or bulk without a conversation is ignored');
     ingested($ingest($fixture('echo', '<9999999999abcdef0123456789abcdef.'.$asset->getId().'@macro.test>')) === 'echo', 'Our own copy is an echo');
 
@@ -213,6 +213,7 @@ try {
     ingested((fileperms($private.'/mail-blobs') & 0777) === 0700 && (fileperms($pdf['path']) & 0777) === 0600 && (fileperms($pdf['path'].'.json') & 0777) === 0600, 'Blob permissions');
     ingested($blobStore->path('../connections') === null && $blobStore->read(str_repeat('0', 64)) === null && $blobStore->usage()['count'] >= 3, 'Blob paths are sha256 only; usage tracked');
     ingested(!str_contains(json_encode(array_map(fn(MetaMessage $m): array => $m->getPayload(), $em->objects[MetaMessage::class])), 'unit-secret'), 'No credential in payloads');
+    ingested($em->unsaved === [], 'Every change is persisted before flush (Mautic DEFERRED_EXPLICIT): '.implode(', ', $em->unsaved));
 } finally {
     if (is_resource($clamd)) { proc_terminate($clamd); proc_close($clamd); }
     $remove = function (string $path) use (&$remove): void {
