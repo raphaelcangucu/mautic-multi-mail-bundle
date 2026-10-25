@@ -31,6 +31,49 @@ final class PrivateStorage
         }
     }
 
+    /** A 0700 subdirectory of the private directory, created on first use. */
+    public static function subdirectory(string $projectDir, string $name): string
+    {
+        if (!preg_match('/^[a-z0-9-]{1,64}(?:\/[a-z0-9-]{1,64})?$/D', $name)) { throw new \LogicException('Invalid storage directory.'); }
+        $path = self::directory($projectDir);
+        foreach (explode('/', $name) as $part) {
+            $path .= '/'.$part;
+            clearstatcache(true, $path);
+            if (!file_exists($path) && !is_link($path)) {
+                $mask = umask(0077);
+                try { @mkdir($path, 0700); } finally { umask($mask); }
+            }
+            self::guard($path, true);
+        }
+
+        return $path;
+    }
+
+    /**
+     * Non-blocking exclusive lock held for a whole operation, such as one mailbox poll.
+     *
+     * @return resource|null null when another process holds it
+     */
+    public static function tryLock(string $projectDir, string $name)
+    {
+        if (!preg_match('/^[a-z0-9-]{1,80}$/D', $name)) { throw new \LogicException('Invalid lock name.'); }
+        $path = self::directory($projectDir).'/'.$name.'.lock';
+        self::guard($path);
+        $mask = umask(0077);
+        try { $lock = @fopen($path, 'c+b'); } finally { umask($mask); }
+        if (!$lock) { throw new \RuntimeException('Private mail storage unavailable.'); }
+        self::guard($path);
+        if (!flock($lock, LOCK_EX | LOCK_NB)) { fclose($lock); return null; }
+
+        return $lock;
+    }
+
+    /** @param resource|null $lock */
+    public static function release($lock): void
+    {
+        if (is_resource($lock)) { flock($lock, LOCK_UN); fclose($lock); }
+    }
+
     public static function transaction(string $projectDir, string $filename, array $initial, callable $action, bool $write = false): array
     {
         if (!preg_match('/^[a-z-]+\.json$/D', $filename)) { throw new \LogicException('Invalid storage filename.'); }

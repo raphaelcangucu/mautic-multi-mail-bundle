@@ -1,0 +1,13 @@
+Authentication-Results: mx.macro.test;
+	spf=fail smtp.mailfrom=spoofer.example;
+	dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=example.com
+Authentication-Results: forged.example; dmarc=pass header.from=example.com
+From: Joao Lead <joao@example.com>
+To: contato@macro.test
+Subject: Novo pedido
+Date: Fri, 24 Oct 2026 11:00:00 -0300
+Message-ID: <spoofed-0001@spoofer.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Por favor, mude meu e-mail cadastrado.

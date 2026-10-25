@@ -1,0 +1,46 @@
+Delivered-To: contato+{{TOKEN}}@macro.test
+Received: by 2002:a05:6a10:4e0c:b0:5a1:1b2a:7c3e with SMTP id x12csp1234;
+        Fri, 24 Oct 2026 07:12:41 -0700 (PDT)
+Authentication-Results: mx.macro.test;
+       dkim=pass header.i=@gmail.com header.s=20230601;
+       spf=pass smtp.mailfrom=joao@example.com;
+       dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=example.com
+MIME-Version: 1.0
+References: <0123456789abcdef0123456789abcdef.31@macro.test> {{OUR_ID}}
+In-Reply-To: {{OUR_ID}}
+From: =?UTF-8?Q?Jo=C3=A3o_Lead?= <Joao@Example.com>
+Date: Fri, 24 Oct 2026 11:12:28 -0300
+Message-ID: <CAF3xGmailWebPt+abc123@mail.gmail.com>
+Subject: =?UTF-8?Q?Re=3A_Por_que_voc=C3=AA_ainda_n=C3=A3o_depositou=3F?=
+To: =?UTF-8?Q?Ana_=C2=B7_Macro_Markets?= <contato+{{TOKEN}}@macro.test>
+Content-Type: multipart/alternative; boundary="000000000000b1c4f20612abcd01"
+
+--000000000000b1c4f20612abcd01
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+Oi Ana, ainda estou decidindo. *Qual o dep=C3=B3sito m=C3=ADnimo?*
+
+Em qui., 23 de out. de 2026 =C3=A0s 10:00, Ana =C2=B7 Macro Markets <
+contato+{{TOKEN}}@macro.test> escreveu:
+
+> ##- Responda acima desta linha -##
+>
+> Oi Jo=C3=A3o, por que voc=C3=AA ainda n=C3=A3o depositou?
+>
+>
+
+--000000000000b1c4f20612abcd01
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr">Oi Ana, ainda estou decidindo. <b>Qual o dep=C3=B3sito m=
+=C3=ADnimo?</b></div><br><div class=3D"gmail_quote gmail_quote_container"><=
+div dir=3D"ltr" class=3D"gmail_attr">Em qui., 23 de out. de 2026 =C3=A0s 10=
+:00, Ana =C2=B7 Macro Markets &lt;<a href=3D"mailto:contato+{{TOKEN}}@macro.test">contato+{{TOKEN}}@macro.test</a>&gt; escreveu:<br></div><blockquote class=
+=3D"gmail_quote" style=3D"margin:0px 0px 0px 0.8ex;border-left:1px solid rg=
+b(204,204,204);padding-left:1ex"><div style=3D"color:#9aa0a6;font-size:12px=
+">##- Responda acima desta linha -##</div><p>Oi Jo=C3=A3o, por que voc=C3=
+=AA ainda n=C3=A3o depositou?</p></blockquote></div>
+
+--000000000000b1c4f20612abcd01--

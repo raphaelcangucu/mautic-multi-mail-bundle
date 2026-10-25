@@ -2,6 +2,7 @@
   "name": "raphaelcangucu/multimail-bundled-transports",
   "require": {
     "php": ">=8.2",
+    "guzzlehttp/psr7": "^2.5",
     "symfony/mailer": "^7.4",
     "symfony/http-client": "^7.4",
     "symfony/amazon-mailer": "^7.4",
@@ -15,7 +16,8 @@
     "symfony/dependency-injection": "^7.4",
     "symfony/mailjet-mailer": "^7.4",
     "symfony/mailer-send-mailer": "^7.4",
-    "symfony/mailchimp-mailer": "^7.4"
+    "symfony/mailchimp-mailer": "^7.4",
+    "zbateson/mail-mime-parser": "^3.0 || ^4.0"
   },
   "config": {
     "allow-plugins": false,

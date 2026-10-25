@@ -110,7 +110,8 @@
                     const active = section.dataset.mailProvider === select.value;
                     section.hidden = !active;
                     section.querySelectorAll('input, select').forEach(function (field) {
-                        field.disabled = !active;
+                        // The conversational flag stays off when the server has no Meta bundle behind it.
+                        field.disabled = !active || Boolean(field.dataset && field.dataset.mailLocked === '1');
                         // Do not leave typed secrets in hidden provider fields.
                         if (!active && field.type === 'password') field.value = '';
                         // Chosen keeps a separate disabled state when an inactive provider becomes active.
@@ -128,6 +129,13 @@
             else select.addEventListener('change', syncProvider);
             syncProvider();
         }
+        const conversational = form.querySelector('#mail-conversational');
+        const imapHost = form.querySelector('#mail-imap-host');
+        if (conversational && imapHost) {
+            const syncConversation = function () { imapHost.required = conversational.checked && !conversational.disabled; };
+            conversational.addEventListener('change', syncConversation);
+            syncConversation();
+        }
         const remove = document.querySelector('[data-mail-remove]');
         if (remove) remove.addEventListener('submit', function (event) {
             if (!window.confirm('Remover esta conexão e suas credenciais salvas?')) event.preventDefault();
@@ -137,11 +145,14 @@
             const connection = test.querySelector('#mail-test-connection');
             const result = document.getElementById('mail-test-result');
             const button = test.querySelector('button[type="submit"]');
+            const roundTrip = document.getElementById('mail-roundtrip');
+            let busy = false;
             const sync = function () {
                 const option = connection.options[connection.selectedIndex];
                 document.getElementById('mail-test-from').textContent = option?.dataset.from || '—';
                 document.getElementById('mail-test-reply').textContent = option?.dataset.reply || '—';
                 button.disabled = !connection.value;
+                if (roundTrip) roundTrip.disabled = busy || !connection.value || option?.dataset.imap !== '1';
                 result.hidden = result.dataset.connection !== connection.value;
             };
             const query = window.mQuery || window.jQuery;
@@ -181,6 +192,38 @@
                     connection.disabled = false;
                     test.removeAttribute('aria-busy');
                     if (query) query(connection).trigger('chosen:updated');
+                }
+            });
+            if (roundTrip) roundTrip.addEventListener('click', async function () {
+                if (roundTrip.disabled || busy || !connection.value) return;
+                busy = true;
+                roundTrip.disabled = true; button.disabled = true; connection.disabled = true;
+                if (query) query(connection).trigger('chosen:updated');
+                result.className = 'alert alert-info mt-md mb-0';
+                result.textContent = roundTrip.dataset.pending;
+                result.dataset.connection = connection.value;
+                result.hidden = false;
+                test.setAttribute('aria-busy', 'true');
+                try {
+                    const data = new FormData(test);
+                    data.set('id', connection.value);
+                    data.set('action', 'roundtrip');
+                    const response = await fetch(test.getAttribute('action'), { method: 'POST', body: data,
+                        credentials: 'same-origin', headers: { 'Accept': 'application/json' }, redirect: 'error' });
+                    const payload = await response.json();
+                    if (typeof payload.message !== 'string') throw new Error('Invalid response');
+                    result.className = 'alert ' + (payload.status === 'arrived' ? 'alert-success' : 'alert-warning') + ' mt-md mb-0';
+                    const details = Array.isArray(payload.details) ? payload.details.filter(function (detail) { return typeof detail === 'string'; }) : [];
+                    result.textContent = payload.message + (payload.reference ? ' · ' + payload.reference : '') + (details.length ? '\n' + details.join('\n') : '');
+                } catch (_) {
+                    result.className = 'alert alert-warning mt-md mb-0';
+                    result.textContent = roundTrip.dataset.error;
+                } finally {
+                    busy = false;
+                    connection.disabled = false; button.disabled = false;
+                    test.removeAttribute('aria-busy');
+                    if (query) query(connection).trigger('chosen:updated');
+                    sync();
                 }
             });
         }

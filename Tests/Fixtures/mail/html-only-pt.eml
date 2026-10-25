@@ -1,0 +1,50 @@
+From: =?ISO-8859-1?Q?Jo=E3o_Lead?= <joao@example.com>
+To: contato+{{TOKEN}}@macro.test
+Subject: Extrato em anexo
+Date: Fri, 24 Oct 2026 13:00:00 -0300
+Message-ID: <html-only-0001@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixed-boundary-01"
+
+--mixed-boundary-01
+Content-Type: multipart/related; boundary="related-boundary-01"
+
+--related-boundary-01
+Content-Type: text/html; charset=windows-1252
+Content-Transfer-Encoding: quoted-printable
+
+<html><head><style>p{color:red}</style><script>alert(1)</script></head><body>=
+<p>Oi! Segue o <strong>extrato</strong> em anexo.</p><p>Meu sal=E1rio cai na=
+ sexta. Veja <a href=3D"https://bank.example/saldo">meu saldo</a>.</p><ul><li>=
+Conta corrente</li><li>Poupan=E7a</li></ul><img src=3D"cid:logo-001@example.com=
+" alt=3D"logo"><div class=3D"gmail_quote">Em 23/10/2026, Ana escreveu:<blockq=
+uote>Oi Jo=E3o</blockquote></div></body></html>
+
+--related-boundary-01
+Content-Type: image/png; name="logo.png"
+Content-Transfer-Encoding: base64
+Content-ID: <logo-001@example.com>
+Content-Disposition: inline; filename="logo.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+
+--related-boundary-01--
+
+--mixed-boundary-01
+Content-Type: application/pdf; name="extrato.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="extrato.pdf"
+
+JVBERi0xLjQKJcOkw7zDtsOfCjEgMCBvYmoKPDwvVHlwZS9DYXRhbG9nL1BhZ2VzIDIgMCBSPj4K
+ZW5kb2JqCjIgMCBvYmoKPDwvVHlwZS9QYWdlcy9LaWRzWzMgMCBSXS9Db3VudCAxPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMyAzXT4+CmVu
+ZG9iagp0cmFpbGVyCjw8L1Jvb3QgMSAwIFI+PgolJUVPRgo=
+
+--mixed-boundary-01
+Content-Type: application/x-msdownload; name="setup.exe"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="setup.exe"
+
+TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAA=
+
+--mixed-boundary-01--

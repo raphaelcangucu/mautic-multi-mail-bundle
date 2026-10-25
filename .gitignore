@@ -1,4 +1,6 @@
 /vendor/
+# Bench symlink to build/package-vendor (a symlink is not matched by "/vendor/").
+/vendor
 /build/dependencies/vendor/
 /build/package-vendor/
 /dist/
@@ -7,5 +9,13 @@
 .env.*
 /connections.json
 /connections.lock
+/hourly-usage.json
+/hourly-usage.lock
+/imap-state.json
+/imap-state.lock
+/imap-poll-*.lock
+/mail-blobs.json
+/mail-blobs.lock
+/mail-blobs/
 /*-private/
 /.DS_Store

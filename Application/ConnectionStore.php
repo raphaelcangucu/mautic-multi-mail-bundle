@@ -24,6 +24,12 @@ final class ConnectionStore
         'smtp2go' => ['label' => 'SMTP2GO · API', 'settings' => [], 'secrets' => ['api_key']],
         'native' => ['label' => 'Mautic · transporte nativo / DSN', 'settings' => [], 'secrets' => ['dsn']],
     ];
+    /**
+     * Optional IMAP side of an SMTP connection (conversational email). Kept out of PROVIDERS
+     * because every PROVIDERS setting is mandatory; the password is an optional secret.
+     */
+    public const IMAP_SETTINGS = ['imap_host' => '', 'imap_port' => '993', 'imap_username' => '', 'imap_folder' => 'INBOX', 'imap_sent_folder' => ''];
+    public const IMAP_SECRET = 'imap_password';
 
     public function __construct(#[Autowire('%kernel.project_dir%')] private readonly string $projectDir)
     {
@@ -136,6 +142,7 @@ final class ConnectionStore
                 $value = $value === '' ? ($previous['secrets'][$key] ?? '') : $value;
                 $connection['secrets'][$key] = $this->text($value, 'Credencial', $key === 'dsn' ? 16384 : 4096, false);
             }
+            $this->conversation($connection, $input, $previous);
             $this->validateProvider($connection);
             $data['connections'][$id] = $connection;
             $this->validateGraph($data['connections']);
@@ -162,6 +169,82 @@ final class ConnectionStore
 
             return $this->publicData($data);
         }, true);
+    }
+
+    /** Internal server use only: conversational SMTP connections with their IMAP secrets. */
+    public function conversationalConnections(): array
+    {
+        return $this->transaction(function (array $data): array {
+            $result = [];
+            foreach ($data['connections'] as $connection) {
+                if ($connection['provider'] !== 'smtp' || !$connection['conversational']) { continue; }
+                $this->validateProvider($connection);
+                $result[] = $connection;
+            }
+            usort($result, fn(array $a, array $b): int => [$a['priority'], $a['id']] <=> [$b['priority'], $b['id']]);
+            return $result;
+        });
+    }
+
+    /** Result of the round-trip test. Not an admin edit, so the revision does not change. */
+    public function recordPlusAddressing(string $id, bool $supported): void
+    {
+        $this->transaction(function (array &$data) use ($id, $supported): array {
+            if (!isset($data['connections'][$id])) { throw new \RuntimeException('Mail connection unavailable.'); }
+            $data['connections'][$id]['plus_addressing'] = $supported;
+            $data['connections'][$id]['plus_addressing_checked_at'] = gmdate(DATE_ATOM);
+            return [];
+        }, true);
+    }
+
+    /** The mailbox that receives replies: Reply-To when configured, otherwise the sender. */
+    public static function accountAddress(array $connection): string
+    {
+        return strtolower($connection['reply_to'] !== '' ? $connection['reply_to'] : $connection['from_email']);
+    }
+
+    private function conversation(array &$connection, array $input, ?array $previous): void
+    {
+        $connection['conversational'] = $this->boolean($input['conversational'] ?? ($previous['conversational'] ?? false));
+        $sameAccount = $previous !== null && $previous['from_email'] === $connection['from_email'] && $previous['reply_to'] === $connection['reply_to'];
+        // A new account address has not been through the round-trip test yet.
+        $connection['plus_addressing'] = $sameAccount ? ($previous['plus_addressing'] ?? true) : true;
+        $connection['plus_addressing_checked_at'] = $sameAccount ? ($previous['plus_addressing_checked_at'] ?? null) : null;
+        if ($connection['provider'] !== 'smtp') {
+            if ($connection['conversational']) { throw new \InvalidArgumentException('mautic.multimail.conversation.smtp_only'); }
+            return;
+        }
+        foreach (self::IMAP_SETTINGS as $key => $default) {
+            $value = $input['settings'][$key] ?? ($previous['settings'][$key] ?? $default);
+            if (!is_string($value) || strlen($value) > 254 || preg_match('/[\x00-\x1F\x7F]/', $value)) {
+                throw new \InvalidArgumentException('mautic.multimail.conversation.invalid_imap');
+            }
+            $value = trim($value);
+            $connection['settings'][$key] = $value === '' && in_array($key, ['imap_port', 'imap_folder'], true) ? $default : $value;
+        }
+        $secret = $input['secrets'][self::IMAP_SECRET] ?? '';
+        if (!is_string($secret) || strlen($secret) > 4096 || preg_match('/[\x00-\x1F\x7F]/', $secret)) {
+            throw new \InvalidArgumentException('Credencial inválida.');
+        }
+        // Empty keeps the saved IMAP password; with none saved, IMAP reuses the SMTP password.
+        $secret = $secret === '' ? ($previous['secrets'][self::IMAP_SECRET] ?? '') : $secret;
+        if ($secret !== '') { $connection['secrets'][self::IMAP_SECRET] = $secret; }
+        $this->validateImap($connection);
+    }
+
+    private function validateImap(array $connection): void
+    {
+        $settings = $connection['settings'];
+        $folder = '/^[^\x00-\x1F\x7F*%]{1,200}$/Du';
+        if (($settings['imap_host'] !== '' && !preg_match('/^(?=.{1,253}$)[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$/Di', $settings['imap_host']))
+            || !in_array($settings['imap_port'], ['993', '143'], true)
+            || !preg_match($folder, $settings['imap_folder'])
+            || ($settings['imap_sent_folder'] !== '' && !preg_match($folder, $settings['imap_sent_folder']))) {
+            throw new \InvalidArgumentException('mautic.multimail.conversation.invalid_imap');
+        }
+        if ($connection['conversational'] && $settings['imap_host'] === '') {
+            throw new \InvalidArgumentException('mautic.multimail.conversation.imap_required');
+        }
     }
 
     private function validateProvider(array $connection): void
@@ -326,7 +409,9 @@ final class ConnectionStore
             function (array &$data) use ($action): array {
                 if (!is_int($data['revision'] ?? null) || !is_array($data['connections'] ?? null)) { throw new \RuntimeException('Private mail configuration invalid.'); }
                 foreach ($data['connections'] as &$connection) {
-                    $connection += ['hourly_limit' => 0, 'daily_limit' => 0, 'monthly_limit' => 0, 'priority' => 100, 'pool_enabled' => $connection['provider'] !== 'native', 'quota_group' => ''];
+                    $connection += ['hourly_limit' => 0, 'daily_limit' => 0, 'monthly_limit' => 0, 'priority' => 100, 'pool_enabled' => $connection['provider'] !== 'native', 'quota_group' => '',
+                        'conversational' => false, 'plus_addressing' => true, 'plus_addressing_checked_at' => null];
+                    if ($connection['provider'] === 'smtp') { $connection['settings'] += self::IMAP_SETTINGS; }
                 }
                 unset($connection);
                 $this->validateGraph($data['connections']);

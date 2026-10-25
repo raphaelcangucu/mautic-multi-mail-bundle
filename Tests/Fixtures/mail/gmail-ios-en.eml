@@ -1,0 +1,30 @@
+Delivered-To: contato@macro.test
+X-Original-To: contato+{{TOKEN}}@macro.test
+MIME-Version: 1.0
+References: {{OUR_ID}}
+In-Reply-To: {{OUR_ID}}
+From: John Lead <john.lead@example.org>
+Date: Fri, 24 Oct 2026 09:40:02 -0400
+Message-ID: <CAJ+iOSgmail7788@mail.gmail.com>
+Subject: Re: Why haven't you deposited yet?
+To: "Ana · Macro Markets" <contato+{{TOKEN}}@macro.test>
+Content-Type: multipart/alternative; boundary="0000000000002ab1c80612abcd02"
+
+--0000000000002ab1c80612abcd02
+Content-Type: text/plain; charset="UTF-8"
+
+Sounds good, I'll deposit tomorrow.
+
+On Thu, Oct 23, 2026 at 10:00 AM Ana · Macro Markets <contato+{{TOKEN}}@macro.test> wrote:
+
+> ##- Responda acima desta linha -##
+>
+> Hi John, why haven't you deposited yet?
+>
+
+--0000000000002ab1c80612abcd02
+Content-Type: text/html; charset="UTF-8"
+
+<div dir="auto">Sounds good, I'll deposit tomorrow.</div><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">On Thu, Oct 23, 2026 at 10:00 AM Ana · Macro Markets &lt;contato+{{TOKEN}}@macro.test&gt; wrote:<br></div><blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex"><div>##- Responda acima desta linha -##</div><div>Hi John, why haven't you deposited yet?</div></blockquote></div>
+
+--0000000000002ab1c80612abcd02--
