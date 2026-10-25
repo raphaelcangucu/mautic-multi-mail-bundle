@@ -116,7 +116,55 @@ try {
     $secondRelease = new ConnectionStore($root.'/deployment/releases/second');
     check($secondRelease->overview() === $savedRelease, 'Registry survives an atomic release switch');
     check(!file_exists($root.'/deployment/releases/inbox-mail-private'), 'Credentials are outside release retention');
+
+    // Conversational email: optional IMAP settings and secret on SMTP connections only.
+    mkdir($root.'/conversation', 0700);
+    $conversation = new ConnectionStore($root.'/conversation');
+    $conversationPrivate = $root.'/conversation-multimail-private';
+    $imap = array_replace_recursive($input, ['conversational' => '1', 'settings' => ['imap_host' => 'imap.example.com', 'imap_port' => '993',
+        'imap_username' => 'support@example.com', 'imap_folder' => '', 'imap_sent_folder' => 'Itens Enviados'], 'secrets' => ['imap_password' => 'unit-secret-imap']]);
+    $view = $conversation->save($imap, 0, 8);
+    $saved = $view['connections'][0];
+    check($saved['conversational'] === true && $saved['plus_addressing'] === true && $saved['plus_addressing_checked_at'] === null, 'Conversational flag and +tag default');
+    check($saved['settings']['imap_folder'] === 'INBOX' && $saved['settings']['imap_sent_folder'] === 'Itens Enviados' && $saved['settings']['imap_port'] === '993', 'IMAP defaults and values');
+    check($saved['secret_configured']['imap_password'] === true && !str_contains(json_encode($view), 'unit-secret'), 'IMAP password stored as a secret, never public');
+    $disk = json_decode(file_get_contents($conversationPrivate.'/connections.json'), true);
+    check($disk['connections'][$saved['id']]['secrets']['imap_password'] === 'unit-secret-imap', 'IMAP password in the private file');
+    $view = $conversation->save(array_replace_recursive($imap, ['id' => $saved['id'], 'secrets' => ['password' => '', 'imap_password' => '']]), 1, 8);
+    $disk = json_decode(file_get_contents($conversationPrivate.'/connections.json'), true);
+    check($disk['connections'][$saved['id']]['secrets']['imap_password'] === 'unit-secret-imap', 'Blank IMAP password keeps the saved one');
+    $internal = $conversation->conversationalConnections();
+    check(count($internal) === 1 && $internal[0]['secrets']['imap_password'] === 'unit-secret-imap', 'Poller reads conversational connections with secrets');
+    foreach ([['settings' => ['imap_port' => '110']], ['settings' => ['imap_host' => 'bad host']], ['settings' => ['imap_folder' => "INBOX\r\nx"]],
+        ['settings' => ['imap_folder' => 'INBOX*']], ['settings' => ['imap_host' => '']], ['secrets' => ['imap_password' => ['unit-secret']]], ['conversational' => 'yes']] as $change) {
+        refuses(fn() => $conversation->save(array_replace_recursive($imap, ['id' => $saved['id']], $change), 2, 8));
+    }
+    refuses(fn() => $conversation->save(array_replace($input, ['provider' => 'resend', 'settings' => [], 'secrets' => ['api_key' => 're_unit-secret-abcdefghijklmnop'], 'conversational' => '1']), 2, 8));
+    $plain = $conversation->save(array_replace_recursive($input, ['name' => 'Transport only', 'settings' => ['imap_host' => '']]), 2, 8);
+    check($plain['connections'][1]['conversational'] === false && $plain['connections'][1]['settings']['imap_host'] === '', 'IMAP stays optional for a transport-only SMTP connection');
+    check(count($conversation->conversationalConnections()) === 1, 'Only conversational connections are polled');
+    $conversation->recordPlusAddressing($saved['id'], false);
+    $after = $conversation->overview();
+    check($after['revision'] === 3 && $after['connections'][0]['plus_addressing'] === false && is_string($after['connections'][0]['plus_addressing_checked_at']), 'Round-trip result recorded without a revision change');
+    $after = $conversation->save(array_replace_recursive($imap, ['id' => $saved['id']]), 3, 8);
+    check($after['connections'][0]['plus_addressing'] === false, 'Editing other fields keeps the round-trip result');
+    $after = $conversation->save(array_replace_recursive($imap, ['id' => $saved['id'], 'reply_to' => 'contato@example.com']), 4, 8);
+    check($after['connections'][0]['plus_addressing'] === true && $after['connections'][0]['plus_addressing_checked_at'] === null, 'A new account address needs a new round trip');
+    check(ConnectionStore::accountAddress($after['connections'][0]) === 'contato@example.com' && ConnectionStore::accountAddress(['reply_to' => '', 'from_email' => 'Support@Example.com']) === 'support@example.com', 'Account address');
+    // A registry written by 0.4.0 has none of the new keys.
+    $legacy = json_decode(file_get_contents($conversationPrivate.'/connections.json'), true);
+    foreach ($legacy['connections'] as &$record) {
+        unset($record['conversational'], $record['plus_addressing'], $record['plus_addressing_checked_at']);
+        foreach (array_keys(ConnectionStore::IMAP_SETTINGS) as $key) { unset($record['settings'][$key]); }
+    }
+    unset($record);
+    file_put_contents($conversationPrivate.'/connections.json', json_encode($legacy));
+    $upgraded = $conversation->overview()['connections'][0];
+    check($upgraded['conversational'] === false && $upgraded['settings']['imap_folder'] === 'INBOX' && $upgraded['settings']['imap_port'] === '993' && $upgraded['plus_addressing'] === true, 'Legacy records receive defaults');
+    check($conversation->conversationalConnections() === [], 'Legacy records are not conversational');
 } finally {
+    foreach (glob($root.'/conversation-multimail-private/*') ?: [] as $file) { unlink($file); }
+    if (is_dir($root.'/conversation')) { rmdir($root.'/conversation-multimail-private'); rmdir($root.'/conversation'); }
     foreach (glob($private.'/*') ?: [] as $file) { unlink($file); }
     if (is_dir($root.'/deployment')) {
         foreach (glob($root.'/deployment/shared/inbox-mail-private/*') ?: [] as $file) { unlink($file); }
@@ -128,4 +176,4 @@ try {
     rmdir($root.'/other-multimail-private'); rmdir($root.'/other');
     rmdir($private); rmdir($root.'/project'); rmdir($root);
 }
-echo "PASS: private multi-provider registry, secret preservation/redaction, no expiry, fallback chains/cycles/references, atomic rejection, revision conflicts, provider validation and filesystem guards; no database or network\n";
+echo "PASS: private multi-provider registry, secret preservation/redaction, no expiry, fallback chains/cycles/references, atomic rejection, revision conflicts, provider validation, filesystem guards and optional conversational IMAP settings/secret/defaults; no database or network\n";

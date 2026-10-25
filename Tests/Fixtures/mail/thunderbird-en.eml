@@ -1,0 +1,53 @@
+Message-ID: <4b9f2c1e-7a3d-4e8b-9c1f-2a3b4c5d6e7f@posteo.example>
+Date: Fri, 24 Oct 2026 18:44:09 +0200
+MIME-Version: 1.0
+User-Agent: Mozilla Thunderbird
+Subject: Re: Why haven't you deposited yet?
+To: =?UTF-8?Q?Ana_=C2=B7_Macro_Markets?= <contato+{{TOKEN}}@macro.test>
+References: <earlier-from-lead@posteo.example> {{OUR_ID}}
+Content-Language: en-US
+From: Hans Lead <hans@posteo.example>
+In-Reply-To: {{OUR_ID}}
+Content-Type: multipart/alternative;
+ boundary="------------8xPqZ0aB1cD2eF3gH4iJ5kL6"
+
+This is a multi-part message in MIME format.
+--------------8xPqZ0aB1cD2eF3gH4iJ5kL6
+Content-Type: text/plain; charset=UTF-8; format=flowed
+Content-Transfer-Encoding: 8bit
+
+Thanks, I'm waiting for my salary.
+
+--
+Hans Lead
+Berlin
+
+On 10/23/26 10:00, Ana · Macro Markets wrote:
+> ##- Responda acima desta linha -##
+>
+> Hi Hans, why haven't you deposited yet?
+
+--------------8xPqZ0aB1cD2eF3gH4iJ5kL6
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  </head>
+  <body>
+    <p>Thanks, I'm waiting for my salary.</p>
+    <pre class="moz-signature" cols="72">--
+Hans Lead
+Berlin</pre>
+    <div class="moz-cite-prefix">On 10/23/26 10:00, Ana · Macro Markets wrote:<br>
+    </div>
+    <blockquote type="cite" cite="mid:{{OUR_ID_BARE}}">
+      <div style="color:#9aa0a6;font-size:12px">##- Responda acima desta linha -##</div>
+      <p>Hi Hans, why haven't you deposited yet?</p>
+    </blockquote>
+  </body>
+</html>
+
+--------------8xPqZ0aB1cD2eF3gH4iJ5kL6--

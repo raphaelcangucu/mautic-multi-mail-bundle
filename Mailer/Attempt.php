@@ -17,6 +17,12 @@ final class Attempt
         return $this->outcome->confirmedNotAccepted();
     }
 
+    /** @return array{stage: string, code: int, response: string}|null */
+    public function smtpRefusal(): ?array
+    {
+        return $this->outcome instanceof ConfirmedSmtpTransport ? $this->outcome->refusal() : null;
+    }
+
     public function httpStatus(): ?int
     {
         return $this->outcome instanceof OutcomeHttpClient ? $this->outcome->statusCode() : null;

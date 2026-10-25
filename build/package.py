@@ -25,14 +25,19 @@ with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         source_paths = [root / name for name in tracked if name]
     else:
         # Source archives have no Git index: allow only plugin source folders/files.
-        folders = ('Application', 'Assets', 'Config', 'Controller', 'DependencyInjection', 'EventSubscriber', 'Form', 'Mailer', 'Resources', 'Tests', 'Translations')
+        folders = ('Application', 'Assets', 'Command', 'Config', 'Controller', 'Conversation', 'DependencyInjection', 'EventSubscriber', 'Form', 'Imap', 'Inbox', 'Mailer', 'Meta', 'Resources', 'Tests', 'Translations')
         source_paths = [path for folder in folders for path in (root / folder).rglob('*')]
-        source_paths += [root / name for name in ('MauticMultiMailBundle.php', 'composer.json', 'README.md', 'CONTRIBUTING.md', 'LICENSE.txt')]
+        source_paths += [root / name for name in ('MauticMultiMailBundle.php', 'composer.json', 'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.txt')]
+    # Private runtime state (credentials, quotas, IMAP positions, mail blobs) never ships.
+    private_names = ('connections.json', 'connections.lock', 'hourly-usage.json', 'hourly-usage.lock', 'imap-state.json', 'imap-state.lock',
+                     'mail-blobs.json', 'mail-blobs.lock')
     for path in source_paths:
         if not path.is_file():
             continue
         relative = path.relative_to(root)
-        if relative.parts[0] in ('.git', 'dist', 'build', 'vendor', '.github') or relative.name in ('.gitignore', '.DS_Store', 'connections.json', 'connections.lock', 'hourly-usage.json', 'hourly-usage.lock') or relative.name.startswith('.env') or any(part.endswith('-private') for part in relative.parts):
+        if relative.parts[0] in ('.git', 'dist', 'build', 'vendor', 'bin', '.github') or relative.name in ('.gitignore', '.DS_Store') + private_names \
+                or (relative.name.startswith('imap-poll-') and relative.name.endswith('.lock')) or 'mail-blobs' in relative.parts \
+                or relative.name.startswith('.env') or any(part.endswith('-private') for part in relative.parts):
             continue
         archive.write(path, 'MauticMultiMailBundle/' + str(relative))
     for path in vendor.rglob('*'):

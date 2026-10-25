@@ -34,7 +34,7 @@
                 <tbody>
                 {% for connection in data.connections %}
                     <tr data-mail-connection="{{ connection.id }}" data-hourly-history="{{ connection.hourly.history|json_encode|e('html_attr') }}">
-                        <td><strong>{{ connection.name }}</strong><br><small class="text-muted">{{ 'mautic.multimail.quota.priority'|trans }} {{ connection.priority }}</small>{% if transport.connection_id == connection.id %}<br><span class="label label-success">{{ 'mautic.multimail.transport.active'|trans }}</span>{% elseif transport.rotation|default(false) and connection.pool_enabled %}<br><span class="label label-info">{{ 'mautic.multimail.quota.enabled'|trans }}</span>{% else %}<br><small class="text-muted">{{ 'mautic.multimail.transport.registered'|trans }}</small>{% endif %}</td>
+                        <td><strong>{{ connection.name }}</strong><br><small class="text-muted">{{ 'mautic.multimail.quota.priority'|trans }} {{ connection.priority }}</small>{% if transport.connection_id == connection.id %}<br><span class="label label-success">{{ 'mautic.multimail.transport.active'|trans }}</span>{% elseif transport.rotation|default(false) and connection.pool_enabled %}<br><span class="label label-info">{{ 'mautic.multimail.quota.enabled'|trans }}</span>{% else %}<br><small class="text-muted">{{ 'mautic.multimail.transport.registered'|trans }}</small>{% endif %}{% if connection.conversational|default(false) %}{% set state = inbound[connection.id]|default(null) %}<br><span class="label label-primary" data-mail-conversation>{{ 'mautic.multimail.conversation.badge'|trans }}</span>{% if state and state.status != 'ok' %} <span class="label {{ state.status == 'auth_failed' ? 'label-danger' : 'label-warning' }}" data-mail-inbound="{{ state.status }}" title="{{ state.last_error|default('') }}">{{ ('mautic.multimail.conversation.inbound_' ~ state.status)|trans }}</span>{% endif %}{% endif %}</td>
                         <td>{{ providers[connection.provider].label }}</td>
                         <td>{{ connection.from_email }}{% if connection.reply_to %}<br><small class="text-muted">Respostas: {{ connection.reply_to }}</small>{% endif %}</td>
                         <td>{% if connection.chain %}{% for step in connection.chain %}{{ step.name }}{% if not loop.last %} → {% endif %}{% endfor %}{% else %}<span class="text-muted">Sem fallback</span>{% endif %}</td>
@@ -75,13 +75,14 @@
                     <div class="col-md-6 form-group"><label for="mail-test-connection">{{ 'mautic.multimail.example.connection'|trans }}</label>
                         <select name="id" id="mail-test-connection" class="form-control" required>
                             <option value="">{{ 'mautic.multimail.example.choose'|trans }}</option>
-                            {% for connection in data.connections %}<option value="{{ connection.id }}" data-from="{{ connection.from_name }} &lt;{{ connection.from_email }}&gt;" data-reply="{{ connection.reply_to }}" {{ connection.id == testId ? 'selected' : '' }}>{{ connection.name }} · {{ providers[connection.provider].label }}</option>{% endfor %}
+                            {% for connection in data.connections %}<option value="{{ connection.id }}" data-from="{{ connection.from_name }} &lt;{{ connection.from_email }}&gt;" data-reply="{{ connection.reply_to }}" data-imap="{{ connection.provider == 'smtp' and connection.settings.imap_host|default('') != '' ? '1' : '0' }}" {{ connection.id == testId ? 'selected' : '' }}>{{ connection.name }} · {{ providers[connection.provider].label }}</option>{% endfor %}
                         </select>
                     </div>
                     <div class="col-md-6 form-group"><label for="mail-test-recipient">{{ 'mautic.multimail.test.recipient'|trans }}</label><input type="email" name="recipient" id="mail-test-recipient" class="form-control" maxlength="254" value="{{ testRecipient }}" required></div>
                 </div>
                 <p class="help-block"><strong>{{ 'mautic.multimail.test.from'|trans }}:</strong> <span id="mail-test-from">—</span><br><strong>{{ 'mautic.multimail.test.reply'|trans }}:</strong> <span id="mail-test-reply">—</span></p>
                 <button type="submit" class="btn btn-primary" {{ data.connections is empty ? 'disabled' : '' }}><i class="ri-send-plane-line" aria-hidden="true"></i> {{ 'mautic.multimail.test.send'|trans }}</button>
+                <button type="button" class="btn btn-default" id="mail-roundtrip" data-pending="{{ 'mautic.multimail.roundtrip.pending'|trans }}" data-error="{{ 'mautic.multimail.test.unavailable'|trans }}" title="{{ 'mautic.multimail.roundtrip.help'|trans }}" disabled><i class="ri-arrow-left-right-line" aria-hidden="true"></i> {{ 'mautic.multimail.roundtrip.action'|trans }}</button>
             </form>
             <div id="mail-test-result" class="alert {{ lastTest and lastTest.result.status == 'accepted' ? 'alert-success' : 'alert-warning' }} mt-md mb-0" role="status" aria-live="polite" data-connection="{{ lastTest.connection_id|default('') }}" {{ not lastTest ? 'hidden' : '' }}>{% if lastTest %}{{ lastTest.result.message }} · {{ lastTest.result.reference }}{% for detail in lastTest.result.details %}{{ '\n' }}{{ detail }}{% endfor %}{% endif %}</div>
         </div>
@@ -142,6 +143,28 @@
                         <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ key == 'mailjet' and field == 'secret_key' ? 'mautic.multimail.mailjet.secret'|trans : labels[field] }}</label><input type="password" class="form-control" name="secrets[{{ field }}]" id="mail-{{ key }}-{{ field }}" value="" maxlength="{{ field == 'dsn' ? 16384 : 4096 }}" autocomplete="new-password" placeholder="{{ editing ? 'Salva · deixe vazio para manter' : 'Informe a credencial' }}" {{ not editing ? 'required' : '' }} {{ key != provider ? 'disabled' : '' }}></div>
                     {% endfor %}
                     </div>
+                    {% if key == 'smtp' %}
+                    {% set imap = editing and key == provider ? editing.settings : {} %}
+                    {% set accountAddress = editing and key == provider ? (editing.reply_to ?: editing.from_email)|lower : '' %}
+                    <fieldset class="mail-conversation-fields" id="mail-conversation-fields">
+                        <legend class="h5"><i class="ri-chat-thread-line" aria-hidden="true"></i> {{ 'mautic.multimail.conversation.title'|trans }}</legend>
+                        <p class="help-block">{{ 'mautic.multimail.conversation.help'|trans }}</p>
+                        {% if not conversationAvailable %}<div class="alert alert-info" id="mail-conversation-unavailable">{{ 'mautic.multimail.conversation.unavailable'|trans }}</div>{% endif %}
+                        <input type="hidden" name="conversational" value="0" {{ key != provider ? 'disabled' : '' }}>
+                        <div class="checkbox"><label><input type="checkbox" name="conversational" value="1" id="mail-conversational" {{ editing and key == provider and editing.conversational|default(false) ? 'checked' : '' }} {{ not conversationAvailable ? 'data-mail-locked="1"' : '' }} {{ key != provider or not conversationAvailable ? 'disabled' : '' }}> {{ 'mautic.multimail.conversation.enable'|trans }}</label></div>
+                        <div class="row">
+                            <div class="col-md-6 form-group"><label for="mail-imap-host">{{ 'mautic.multimail.conversation.imap_host'|trans }}</label><input class="form-control" name="settings[imap_host]" id="mail-imap-host" value="{{ imap.imap_host|default('') }}" maxlength="253" placeholder="imap.seu-dominio.com" {{ key != provider ? 'disabled' : '' }}></div>
+                            <div class="col-md-6 form-group"><label for="mail-imap-port">{{ 'mautic.multimail.conversation.imap_port'|trans }}</label><select class="form-control" name="settings[imap_port]" id="mail-imap-port" {{ key != provider ? 'disabled' : '' }}><option value="993" {{ imap.imap_port|default('993') == '993' ? 'selected' : '' }}>993 · SSL/TLS</option><option value="143" {{ imap.imap_port|default('993') == '143' ? 'selected' : '' }}>143 · STARTTLS</option></select></div>
+                            <div class="col-md-6 form-group"><label for="mail-imap-username">{{ 'mautic.multimail.conversation.imap_username'|trans }} <small class="text-muted">{{ 'mautic.multimail.conversation.optional'|trans }}</small></label><input class="form-control" name="settings[imap_username]" id="mail-imap-username" value="{{ imap.imap_username|default('') }}" maxlength="254" placeholder="{{ 'mautic.multimail.conversation.same_as_smtp'|trans }}" {{ key != provider ? 'disabled' : '' }}></div>
+                            <div class="col-md-6 form-group"><label for="mail-imap-password">{{ 'mautic.multimail.conversation.imap_password'|trans }} <small class="text-muted">{{ 'mautic.multimail.conversation.optional'|trans }}</small></label><input type="password" class="form-control" name="secrets[imap_password]" id="mail-imap-password" value="" maxlength="4096" autocomplete="new-password" placeholder="{{ editing and editing.secret_configured.imap_password|default(false) ? 'Salva · deixe vazio para manter' : 'mautic.multimail.conversation.same_as_smtp'|trans }}" {{ key != provider ? 'disabled' : '' }}></div>
+                            <div class="col-md-6 form-group"><label for="mail-imap-folder">{{ 'mautic.multimail.conversation.imap_folder'|trans }}</label><input class="form-control" name="settings[imap_folder]" id="mail-imap-folder" value="{{ imap.imap_folder|default('INBOX') }}" maxlength="200" {{ key != provider ? 'disabled' : '' }}></div>
+                            <div class="col-md-6 form-group"><label for="mail-imap-sent">{{ 'mautic.multimail.conversation.imap_sent_folder'|trans }} <small class="text-muted">{{ 'mautic.multimail.conversation.optional'|trans }}</small></label><input class="form-control" name="settings[imap_sent_folder]" id="mail-imap-sent" value="{{ imap.imap_sent_folder|default('') }}" maxlength="200" placeholder="[Gmail]/Sent Mail" {{ key != provider ? 'disabled' : '' }}><p class="help-block">{{ 'mautic.multimail.conversation.sent_help'|trans }}</p></div>
+                        </div>
+                        <p class="help-block">{{ 'mautic.multimail.conversation.quota_hint'|trans }}</p>
+                        {% if editing and key == provider and editing.conversational|default(false) %}<p class="help-block" id="mail-plus-addressing">{{ (editing.plus_addressing_checked_at ? (editing.plus_addressing ? 'mautic.multimail.conversation.plus_ok' : 'mautic.multimail.conversation.plus_missing') : 'mautic.multimail.conversation.plus_unchecked')|trans }}</p>{% endif %}
+                        {% if monitoredAddress and accountAddress and (monitoredAddress == accountAddress or monitoredAddress == imap.imap_username|default('')|lower) %}<div class="alert alert-warning" id="mail-monitored-conflict">{{ 'mautic.multimail.conversation.monitored_conflict'|trans }}</div>{% endif %}
+                    </fieldset>
+                    {% endif %}
                     {% if key in ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go'] %}<p class="help-block">{{ ('mautic.multimail.provider.' ~ key ~ '.help')|trans }}</p>{% endif %}
                     {% if key == 'native' %}<p class="help-block">Use o DSN do adaptador já instalado no Mautic, incluindo opções e credenciais codificadas. O plugin mantém o transporte original, inclusive interfaces de lote e bounces quando fornecidas pelo adaptador. O DSN fica privado; deixe vazio ao editar para mantê-lo.</p>{% endif %}
                 </fieldset>
@@ -158,5 +181,5 @@
         </div>
     </div>
 </div>
-{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=8', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
+{{ includeScript('plugins/MauticMultiMailBundle/Assets/js/connections.js?v=9', 'multimailconnectionsOnLoad', 'multimailconnectionsOnLoad') }}
 {% endblock %}

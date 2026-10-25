@@ -6,11 +6,13 @@ namespace MauticPlugin\MauticMultiMailBundle\Mailer;
 
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\Mailer\Transport\Dsn;
+use Symfony\Component\Mailer\Transport\Smtp\Stream\AbstractStream;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 final class ConnectionBuilder
 {
-    public function __construct(private readonly ?HttpClientInterface $httpClient = null)
+    /** @param \Closure(array): AbstractStream|null $smtpStream test seam for a simulated SMTP server; never set in production */
+    public function __construct(private readonly ?HttpClientInterface $httpClient = null, private readonly ?\Closure $smtpStream = null)
     {
     }
 
@@ -19,7 +21,8 @@ final class ConnectionBuilder
         $settings = $connection['settings'];
         $secrets = $connection['secrets'];
         if ($connection['provider'] === 'smtp') {
-            $smtp = new ConfirmedSmtpTransport($settings['host'], (int) $settings['port'], $settings['encryption'] === 'ssl');
+            $smtp = new ConfirmedSmtpTransport($settings['host'], (int) $settings['port'], $settings['encryption'] === 'ssl',
+                stream: $this->smtpStream === null ? null : ($this->smtpStream)($connection));
             $smtp->setRequireTls(true);
             $smtp->setUsername($settings['username']);
             $smtp->setPassword($secrets['password']);

@@ -1,0 +1,13 @@
+From: Joao Lead <joao@example.com>
+To: contato+{{TOKEN}}@macro.test
+Subject: =?UTF-8?Q?Resposta_autom=C3=A1tica=3A_Por_que_voc=C3=AA_ainda_n=C3=A3o_depositou=3F?=
+Date: Fri, 24 Oct 2026 10:02:00 -0300
+Message-ID: <auto-reply-0001@example.com>
+In-Reply-To: {{OUR_ID}}
+Auto-Submitted: auto-replied
+X-Autoreply: yes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Estou de férias até 30/10. Respondo quando voltar.
