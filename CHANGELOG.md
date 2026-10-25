@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1 — Persist every dispatcher change
+
+### Fixed
+
+- **A reply sent from the Inbox showed twice in the thread.** Mautic entities use
+  DEFERRED_EXPLICIT change tracking, so a setter followed by a bare `flush()` never reaches the
+  database. The job's `messageLogId` was written only when the queue completed the job, after the
+  SMTP session; an app poll in between saw the outgoing message without the link that folds it
+  into the request card, and cached both. The dispatcher now persists the job right after the
+  message exists, and persists the message on the failed, temporary and uncertain outcomes too
+  (their status and error stayed in memory only).
+- The test EntityManager stub now records changes that a real flush would drop; the dispatcher
+  and ingestion suites assert there are none.
+
 ## 0.5.0 — Conversational email
 
 Read and answer, in the Inbox, the emails the platform started, as threads. Requires the Meta
