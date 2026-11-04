@@ -80,6 +80,19 @@ final class ProviderResponseGuard
                     throw new ProviderResponseException($accepted === 0 && $failed === $expected && $expected > 0);
                 }
                 return self::safeId($results['email_id'] ?? null);
+            case 'cloudflare':
+                $results = $data['result'] ?? null;
+                if (($data['success'] ?? null) !== true || !is_array($results)) { throw new ProviderResponseException(false); }
+                $expected = array_map('strtolower', $payload['recipients'] ?? []);
+                $accepted = array_map('strtolower', [...($results['delivered'] ?? []), ...($results['queued'] ?? [])]);
+                $refused = array_map('strtolower', [...($results['permanent_bounces'] ?? []), ...($results['suppressed_recipients'] ?? [])]);
+                if ($expected === [] || array_diff($expected, $accepted) || $refused !== []) {
+                    throw new ProviderResponseException($accepted === [] && !array_diff($expected, $refused) && $expected !== []);
+                }
+                // Cloudflare returns the RFC 5322 form, such as <id@example.com>.
+                $id = $results['message_id'] ?? null;
+                if (!is_string($id) || !preg_match('/^<?([^<>\s]{1,128})>?$/D', $id, $match)) { throw new ProviderResponseException(false); }
+                return $match[1];
         }
         throw new ProviderResponseException(false);
     }

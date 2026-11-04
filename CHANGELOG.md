@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 — Cloudflare Email Service
+
+### Added
+
+- **Cloudflare API connection.** It uses the `send_raw` endpoint on port 443, so it works on hosts that block outbound SMTP port 465. Every recipient must be delivered or queued, and a partial response never triggers a fallback.
+
 ## 0.5.1 — Persist every dispatcher change
 
 ### Fixed

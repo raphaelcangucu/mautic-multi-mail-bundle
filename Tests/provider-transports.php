@@ -26,6 +26,7 @@ function providerSuccess(string $provider, array $payload): MockResponse
         'mandrill' => array_map(static fn ($recipient) => ['email' => $recipient['email'], 'status' => 'sent', '_id' => $id], $payload['message']['to']),
         'sparkpost' => ['results' => ['total_accepted_recipients' => count($payload['recipients']), 'total_rejected_recipients' => 0, 'id' => $id]],
         'smtp2go' => ['data' => ['succeeded' => count($payload['to']) + count($payload['cc'] ?? []) + count($payload['bcc'] ?? []), 'failed' => 0, 'failures' => [], 'email_id' => $id]],
+        'cloudflare' => ['success' => true, 'errors' => [], 'messages' => [], 'result' => ['message_id' => '<'.$id.'>', 'delivered' => array_map('strtoupper', $payload['recipients']), 'queued' => [], 'permanent_bounces' => []]],
     };
     return new MockResponse($body === null ? '' : json_encode($body, JSON_THROW_ON_ERROR), ['http_code' => $provider === 'mailersend' ? 202 : 200,
         'response_headers' => $provider === 'mailersend' ? ['x-message-id: '.$id] : []]);
@@ -35,14 +36,16 @@ $root = sys_get_temp_dir().'/multimail_providers_unit_'.bin2hex(random_bytes(8))
 mkdir($root.'/project', 0700, true);
 $store = new ConnectionStore($root.'/project');
 $base = ['name' => 'Unit provider', 'from_email' => 'configured@example.com', 'from_name' => 'Configured sender', 'reply_to' => 'reply@example.com', 'fallback' => ''];
-$providers = ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go'];
+$providers = ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go', 'cloudflare'];
+$cloudflareAccount = str_repeat('a1', 16);
 $revision = 0;
 $endpoints = ['mailjet' => 'https://api.mailjet.com/v3.1/send', 'mailersend' => 'https://api.mailersend.com/v1/email',
-    'mandrill' => 'https://mandrillapp.com/api/1.0/messages/send.json', 'sparkpost' => 'https://api.eu.sparkpost.com/api/v1/transmissions', 'smtp2go' => 'https://api.smtp2go.com/v3/email/send'];
+    'mandrill' => 'https://mandrillapp.com/api/1.0/messages/send.json', 'sparkpost' => 'https://api.eu.sparkpost.com/api/v1/transmissions', 'smtp2go' => 'https://api.smtp2go.com/v3/email/send',
+    'cloudflare' => 'https://api.cloudflare.com/client/v4/accounts/'.$cloudflareAccount.'/email/sending/send_raw'];
 try {
     foreach ($providers as $provider) {
         $secrets = array_fill_keys(ConnectionStore::PROVIDERS[$provider]['secrets'], 'unit-secret-'.$provider);
-        $input = array_merge($base, ['provider' => $provider, 'settings' => $provider === 'sparkpost' ? ['region' => 'eu'] : [], 'secrets' => $secrets]);
+        $input = array_merge($base, ['provider' => $provider, 'settings' => $provider === 'sparkpost' ? ['region' => 'eu'] : ($provider === 'cloudflare' ? ['account_id' => $cloudflareAccount] : []), 'secrets' => $secrets]);
         $view = $store->save($input, $revision++, 1);
         $reserve = end($view['connections'])['id'];
         $view = $store->save(array_replace($input, ['name' => 'Unit primary', 'fallback' => $reserve]), $revision++, 1);
@@ -80,7 +83,7 @@ try {
         checkProvider($sent->getMessageId() === ($provider === 'mailjet' ? '123456' : 'accepted-123'), 'Actual provider identifier preserved');
         checkProvider(!str_contains((string) $transport, 'unit-secret'), 'Transport descriptions redact credentials');
         $serialized = json_encode($request);
-        if ($provider !== 'sparkpost') {
+        if (!in_array($provider, ['sparkpost', 'cloudflare'], true)) {
             checkProvider(!str_contains($serialized, 'excluded') && !str_contains($serialized, 'visible@example.com'), 'API recipient categories obey the explicit envelope');
         }
         switch ($provider) {
@@ -125,6 +128,29 @@ try {
                 checkProvider(in_array(['header' => 'List-Unsubscribe', 'value' => '<https://example.com/unsubscribe>'], $request['custom_headers'], true), 'SMTP2GO unsubscribe header');
                 checkProvider(str_contains(implode(' ', $auth['x-smtp2go-api-key']), 'unit-secret-smtp2go'), 'SMTP2GO API authorization');
                 break;
+            case 'cloudflare':
+                $mime = $request['mime_message'];
+                checkProvider($request['from'] === 'mautic@example.com' && $request['recipients'] === ['to@example.com', 'cc@example.com', 'bcc@example.com'], 'Cloudflare delivery envelope');
+                checkProvider(str_contains($mime, 'Reply-To: reply@example.com') && !str_contains($mime, "\r\nBcc:"), 'Cloudflare full MIME and Bcc privacy');
+                checkProvider(str_contains($mime, 'List-Unsubscribe:') && str_contains($mime, 'tracking-preserved') && str_contains($mime, base64_encode('report contents')), 'Cloudflare MIME headers/attachment');
+                checkProvider(str_contains(implode(' ', $auth['authorization']), 'Bearer unit-secret-cloudflare'), 'Cloudflare bearer authentication');
+                $cases = [
+                    'partial' => ['message_id' => '<a@b>', 'delivered' => ['to@example.com'], 'queued' => [], 'permanent_bounces' => []],
+                    'bounced' => ['message_id' => '<a@b>', 'delivered' => ['to@example.com', 'cc@example.com'], 'queued' => [], 'permanent_bounces' => ['bcc@example.com']],
+                    'suppressed' => ['message_id' => '<a@b>', 'delivered' => [], 'queued' => [], 'permanent_bounces' => [], 'suppressed_recipients' => ['to@example.com', 'cc@example.com', 'bcc@example.com']],
+                    'no id' => ['delivered' => ['to@example.com', 'cc@example.com', 'bcc@example.com'], 'queued' => [], 'permanent_bounces' => []],
+                ];
+                foreach ($cases as $case => $result) {
+                    $calls = 0;
+                    $mock = new MockHttpClient(function () use (&$calls, $result) { ++$calls; return new MockResponse(json_encode(['success' => true, 'result' => $result]), ['http_code' => 200]); });
+                    try {
+                        (new MultiMailTransportFactory($store, new ConnectionBuilder($mock)))->create(new Dsn('multimail', $primary))->send($email, $envelope);
+                        throw new RuntimeException('Cloudflare '.$case.' response was accepted');
+                    } catch (TransportException) { checkProvider($calls === 1, 'Cloudflare '.$case.' response never invokes a reserve'); }
+                }
+                $queued = new MockHttpClient(new MockResponse(json_encode(['success' => true, 'result' => ['message_id' => '<q@b>', 'delivered' => ['to@example.com'], 'queued' => ['cc@example.com', 'bcc@example.com'], 'permanent_bounces' => []]]), ['http_code' => 200]));
+                checkProvider((new MultiMailTransportFactory($store, new ConnectionBuilder($queued)))->create(new Dsn('multimail', $primary))->send($email, $envelope)->getMessageId() === 'q@b', 'Cloudflare queued recipients are accepted');
+                break;
         }
 
         foreach ([401, 403, 429] as $refusal) {
@@ -160,6 +186,7 @@ try {
             'mandrill' => [['email' => 'test@example.com', 'status' => 'rejected', '_id' => 'unused']],
             'sparkpost' => ['results' => ['total_accepted_recipients' => 0, 'total_rejected_recipients' => 1, 'id' => 'unused']],
             'smtp2go' => ['data' => ['succeeded' => 0, 'failed' => 1, 'failures' => [['message' => 'unit-secret']]]],
+            'cloudflare' => ['success' => true, 'result' => ['message_id' => '<unused@example.com>', 'delivered' => [], 'queued' => [], 'permanent_bounces' => ['test@example.com']]],
         };
         $mock = new MockHttpClient([new MockResponse(json_encode($refused), ['http_code' => $provider === 'mailersend' ? 202 : 200])]);
         $diagnostic = (new ConnectionTester($store, new ConnectionBuilder($mock)))->send($primary, 'test@example.com', $revision);
@@ -170,6 +197,7 @@ try {
             'mandrill' => [['email' => 'test@example.com', 'status' => 'sent', '_id' => "unsafe\nID"]],
             'sparkpost' => ['results' => ['total_accepted_recipients' => 1, 'total_rejected_recipients' => 0, 'id' => "unsafe\nID"]],
             'smtp2go' => ['data' => ['succeeded' => 1, 'failed' => 0, 'email_id' => "unsafe\nID"]],
+            'cloudflare' => ['success' => true, 'result' => ['message_id' => "unsafe\nID", 'delivered' => ['test@example.com'], 'queued' => [], 'permanent_bounces' => []]],
         };
         $mock = new MockHttpClient([new MockResponse(json_encode($invalidId), ['http_code' => $provider === 'mailersend' ? 202 : 200])]);
         $diagnostic = (new ConnectionTester($store, new ConnectionBuilder($mock)))->send($primary, 'test@example.com', $revision);
@@ -184,6 +212,7 @@ try {
             'mandrill' => [['email' => 'to@example.com', 'status' => 'sent', '_id' => 'partial'], ['email' => 'cc@example.com', 'status' => 'rejected'], ['email' => 'bcc@example.com', 'status' => 'invalid']],
             'sparkpost' => ['results' => ['total_accepted_recipients' => 1, 'total_rejected_recipients' => 2, 'id' => 'partial']],
             'smtp2go' => ['data' => ['succeeded' => 1, 'failed' => 2, 'failures' => [['message' => 'partial']]]],
+            'cloudflare' => ['success' => true, 'result' => ['message_id' => '<partial@example.com>', 'delivered' => ['to@example.com'], 'queued' => [], 'permanent_bounces' => ['cc@example.com', 'bcc@example.com']]],
         };
         $calls = 0;
         $mock = new MockHttpClient(function () use ($provider, $partial, &$calls) { ++$calls; return new MockResponse(json_encode($partial), ['http_code' => $provider === 'mailersend' ? 202 : ($provider === 'sparkpost' ? 422 : 200)]); });

@@ -130,7 +130,7 @@
                     <legend class="h5">{{ item.label }} · dados de acesso</legend>
                     <div class="row">
                     {% for field in item.settings %}
-                        {% set labels = {host: 'Servidor SMTP', port: 'Porta', encryption: 'Criptografia', username: 'Usuário SMTP', domain: 'Domínio de envio', region: 'Região'} %}
+                        {% set labels = {host: 'Servidor SMTP', port: 'Porta', encryption: 'Criptografia', username: 'Usuário SMTP', domain: 'Domínio de envio', region: 'Região', account_id: 'Account ID'} %}
                         {% set value = editing and key == provider ? editing.settings[field]|default('') : '' %}
                         <div class="col-md-6 form-group"><label for="mail-{{ key }}-{{ field }}">{{ labels[field] }}</label>
                         {% if field == 'encryption' %}<select class="form-control" name="settings[{{ field }}]" id="mail-{{ key }}-{{ field }}" {{ key != provider ? 'disabled' : '' }}><option value="tls" {{ value == 'tls' ? 'selected' : '' }}>STARTTLS · 587 ou 2525</option><option value="ssl" {{ value == 'ssl' ? 'selected' : '' }}>SSL/TLS · 465</option></select>
@@ -165,7 +165,7 @@
                         {% if monitoredAddress and accountAddress and (monitoredAddress == accountAddress or monitoredAddress == imap.imap_username|default('')|lower) %}<div class="alert alert-warning" id="mail-monitored-conflict">{{ 'mautic.multimail.conversation.monitored_conflict'|trans }}</div>{% endif %}
                     </fieldset>
                     {% endif %}
-                    {% if key in ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go'] %}<p class="help-block">{{ ('mautic.multimail.provider.' ~ key ~ '.help')|trans }}</p>{% endif %}
+                    {% if key in ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go', 'cloudflare'] %}<p class="help-block">{{ ('mautic.multimail.provider.' ~ key ~ '.help')|trans }}</p>{% endif %}
                     {% if key == 'native' %}<p class="help-block">Use o DSN do adaptador já instalado no Mautic, incluindo opções e credenciais codificadas. O plugin mantém o transporte original, inclusive interfaces de lote e bounces quando fornecidas pelo adaptador. O DSN fica privado; deixe vazio ao editar para mantê-lo.</p>{% endif %}
                 </fieldset>
                 {% endfor %}

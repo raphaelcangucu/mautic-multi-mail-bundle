@@ -22,6 +22,7 @@ final class ConnectionStore
         'mandrill' => ['label' => 'Mandrill · Mailchimp Transactional', 'settings' => [], 'secrets' => ['api_key']],
         'sparkpost' => ['label' => 'SparkPost · API', 'settings' => ['region'], 'secrets' => ['api_key']],
         'smtp2go' => ['label' => 'SMTP2GO · API', 'settings' => [], 'secrets' => ['api_key']],
+        'cloudflare' => ['label' => 'Cloudflare · API', 'settings' => ['account_id'], 'secrets' => ['api_key']],
         'native' => ['label' => 'Mautic · transporte nativo / DSN', 'settings' => [], 'secrets' => ['dsn']],
     ];
     /**
@@ -283,6 +284,11 @@ final class ConnectionStore
             case 'sparkpost':
                 if (!in_array($settings['region'], ['us', 'eu'], true)) {
                     throw new \InvalidArgumentException('Escolha a região SparkPost US ou EU.');
+                }
+                break;
+            case 'cloudflare':
+                if (!preg_match('/^[a-f0-9]{32}$/D', $settings['account_id'])) {
+                    throw new \InvalidArgumentException('Informe o Account ID da Cloudflare, com 32 caracteres.');
                 }
                 break;
         }

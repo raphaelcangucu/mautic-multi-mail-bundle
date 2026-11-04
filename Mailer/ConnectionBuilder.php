@@ -31,10 +31,10 @@ final class ConnectionBuilder
             return new Attempt($smtp, $smtp);
         }
         $provider = $connection['provider'];
-        $guarded = in_array($provider, ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go'], true);
+        $guarded = in_array($provider, ['mailjet', 'mailersend', 'mandrill', 'sparkpost', 'smtp2go', 'cloudflare'], true);
         $client = new OutcomeHttpClient($this->httpClient ?? HttpClient::create(['timeout' => 20, 'max_duration' => 30]), $guarded ? $provider : null);
-        if (in_array($provider, ['sparkpost', 'smtp2go'], true)) {
-            return new Attempt(new AdditionalApiTransport($provider, $secrets['api_key'], $settings['region'] ?? 'us', $client), $client);
+        if (in_array($provider, ['sparkpost', 'smtp2go', 'cloudflare'], true)) {
+            return new Attempt(new AdditionalApiTransport($provider, $secrets['api_key'], $settings['region'] ?? 'us', $client, $settings['account_id'] ?? ''), $client);
         }
         $factories = [
             'ses' => ['Amazon\\Transport\\SesTransportFactory', 'ses+https'],

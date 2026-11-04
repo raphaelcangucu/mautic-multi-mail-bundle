@@ -15,9 +15,10 @@ final class AdditionalApiTransport extends AbstractTransport
     private const MAX_REQUEST_BYTES = 20 * 1024 * 1024;
 
     public function __construct(private readonly string $provider, #[\SensitiveParameter] private readonly string $apiKey,
-        private readonly string $region, private readonly OutcomeHttpClient $client)
+        private readonly string $region, private readonly OutcomeHttpClient $client, private readonly string $accountId = '')
     {
-        if (!in_array($provider, ['sparkpost', 'smtp2go'], true) || !in_array($region, ['us', 'eu'], true)) {
+        if (!in_array($provider, ['sparkpost', 'smtp2go', 'cloudflare'], true) || !in_array($region, ['us', 'eu'], true)
+            || ($provider === 'cloudflare' && !preg_match('/^[a-f0-9]{32}$/D', $accountId))) {
             throw new \InvalidArgumentException('Unsupported API connection.');
         }
         parent::__construct();
@@ -35,6 +36,13 @@ final class AdditionalApiTransport extends AbstractTransport
                 'content' => ['email_rfc822' => $mime],
             ];
             $headers = ['Authorization' => $this->apiKey];
+        } elseif ($this->provider === 'cloudflare') {
+            $payload = [
+                'from' => $message->getEnvelope()->getSender()->getAddress(),
+                'recipients' => array_map(static fn (Address $address) => $address->getAddress(), $message->getEnvelope()->getRecipients()),
+                'mime_message' => $message->getMessage()->toString(),
+            ];
+            $headers = ['Authorization' => 'Bearer '.$this->apiKey];
         } else {
             $original = $message->getOriginalMessage();
             if (!$original instanceof Message) { throw new TransportException('An API connection requires a MIME message.'); }
@@ -52,6 +60,7 @@ final class AdditionalApiTransport extends AbstractTransport
 
     private function endpoint(): string
     {
+        if ($this->provider === 'cloudflare') { return 'api.cloudflare.com/client/v4/accounts/'.$this->accountId.'/email/sending/send_raw'; }
         return $this->provider === 'smtp2go' ? 'api.smtp2go.com/v3/email/send'
             : ($this->region === 'eu' ? 'api.eu.sparkpost.com' : 'api.sparkpost.com').'/api/v1/transmissions';
     }
